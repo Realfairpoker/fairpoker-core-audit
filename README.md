@@ -11,6 +11,164 @@ owned client-side fairness code. Backend account services, risk controls,
 deployment credentials, private operations code, and infrastructure secrets are
 not part of this public release.
 
+## Fairness Logic At A Glance
+
+One sentence: Fair Poker does not ask players to trust a hidden dealer. The
+published client code is fixed by IPFS/source fingerprints, browsers co-create
+an encrypted deck, the relay only forwards messages, every accepted action is
+signed into a hash-chain transcript, and anyone can replay the record locally.
+
+```mermaid
+flowchart LR
+  A["Published client CID and source fingerprint"] --> B["Players open the same auditable client"]
+  B --> C["Each browser creates keys, encrypts and shuffles"]
+  C --> D["Final deck is formed in browsers, not on the server"]
+  D --> E["Private card decrypt data goes only to the target player"]
+  E --> F["Bets, folds, reveals and results are signed events"]
+  F --> G["Transcript hash-chain fixes order and content"]
+  G --> H["Local verifier replays signatures, pots, board and winner"]
+```
+
+### 中文闭环说明
+
+1. 先固定代码，再进入牌局。官网公布 Game client CID、源码包 CID、源码包 SHA256 和 `sourceFingerprint`。CID 是内容寻址，文件改动会导致 CID 变化；源码包和指纹用于确认公开核心代码没有被替换。
+2. 牌不是服务器生成的。每个玩家浏览器参与密钥生成、洗牌、加密和逐卡解密流程。平台服务器不生成牌序，也不保存隐藏牌堆明文状态。
+3. 中继不在信任边界内。中继只负责转发消息；它没有玩家私钥、完整解密钥或明文牌堆，因此不能单方面给某个账号发好牌，也不能偷看底牌。
+4. 底牌按玩家隔离。私有发牌阶段，每张牌需要对应的逐卡解密数据；这些私有解密事件只发给目标玩家。公共牌只在翻牌、转牌、河牌或摊牌时公开。
+5. 动作必须可验证。下注、弃牌、开牌、结果等事件由玩家签名，并带有 sender、payload hash 和顺序信息。接收端会校验签名和事件内容。
+6. 结果不是靠截图争论。每局生成 transcript，所有事件进入 hash-chain。下载 transcript 后，本地 verifier 会重新计算事件顺序、签名格式、下注、奖池、公共牌、摊牌和赢家。
+7. 篡改会留下痕迹。如果有人改 transcript、改下注、改赢家、删事件或换顺序，hash-chain 或本地复验会失败或给出警告。
+8. 公平边界也说清楚。这个闭环限制平台控牌、服务器偷牌、无痕改记录和假前端替换；但不能替用户消除本机中毒、恶意浏览器扩展、屏幕共享、弱密码、钓鱼或线下串通风险。
+
+### English Closed Loop
+
+1. Code is fixed before play. The official site publishes the Game client CID,
+source package CID, archive SHA256, and `sourceFingerprint`. A changed file
+changes the CID or fingerprint.
+2. The server does not deal. Player browsers generate keys, shuffle, encrypt,
+and participate in per-card decryption. The backend does not create the deck or
+store hidden deck plaintext.
+3. The relay is outside the trust boundary. It forwards messages only. It does
+not hold player private keys, complete decrypt keys, or plaintext deck state, so
+it cannot unilaterally deal good cards or peek at hole cards.
+4. Private cards stay isolated. Private dealing decrypt events are sent only to
+the intended player. Public cards are released only at board reveal or showdown.
+5. Actions are signed. Bets, folds, reveals, and results are signed events with
+sender and payload-hash checks.
+6. Results are replayable. Each hand produces a transcript hash-chain. The local
+verifier recomputes order, signatures, bets, pots, board cards, showdown, and
+winners.
+7. Tampering is visible. Editing a transcript, changing a bet, swapping a
+winner, deleting an event, or reordering history should break the hash-chain or
+local replay checks.
+8. The boundary is explicit. This protects against platform-controlled dealing,
+relay peeking, silent history edits, and fake-client substitution. It does not
+eliminate malware, malicious extensions, screen sharing, weak passwords,
+phishing, or out-of-band collusion.
+
+### 日本語の公平性クローズドループ
+
+1. プレイ前にコードを固定します。公式サイトは Game client CID、ソース
+パッケージ CID、archive SHA256、`sourceFingerprint` を公開します。ファイル
+が変われば CID または指紋も変わります。
+2. サーバーは配牌しません。各プレイヤーのブラウザが鍵生成、シャッフル、
+暗号化、カードごとの復号に参加します。バックエンドは隠しデッキの平文を
+生成・保存しません。
+3. 中継は信頼境界の外です。中継はメッセージ転送のみで、プレイヤー秘密鍵、
+完全な復号鍵、平文デッキ状態を持ちません。
+4. 底牌はプレイヤーごとに分離されます。私有配牌の復号イベントは対象
+プレイヤーだけに送られ、公開カードはボード公開またはショーダウン時だけ
+公開されます。
+5. アクションは署名されます。ベット、フォールド、公開、結果は sender と
+payload hash を検証できる署名イベントです。
+6. 結果は再検証できます。各ハンドは transcript hash-chain を生成し、ローカル
+verifier が順序、署名、ベット、ポット、ボード、ショーダウン、勝者を再計算します。
+7. 改ざんは見える形で残ります。transcript、ベット、勝者、イベント順序を
+変えると hash-chain またはローカル再検証が失敗します。
+8. 境界も明示します。この仕組みは運営側の控牌、中継の盗み見、履歴の無音
+改ざん、偽クライアント置換を制限します。ただしマルウェア、悪意ある拡張、
+画面共有、弱いパスワード、フィッシング、外部での共謀は別リスクです。
+
+### Bucle Completo De Equidad En Español
+
+1. El código se fija antes de jugar. El sitio oficial publica Game client CID,
+source package CID, archive SHA256 y `sourceFingerprint`. Si cambia un archivo,
+cambia el CID o la huella.
+2. El servidor no reparte. Los navegadores de los jugadores generan claves,
+barajan, cifran y participan en el descifrado por carta. El backend no crea ni
+guarda el mazo oculto en claro.
+3. El relay queda fuera de la frontera de confianza. Solo reenvía mensajes; no
+tiene claves privadas, claves completas de descifrado ni estado del mazo en claro.
+4. Las cartas privadas quedan aisladas por jugador. Los eventos privados de
+descifrado se envían solo al jugador correspondiente. Las cartas públicas se
+liberan solo en flop, turn, river o showdown.
+5. Las acciones están firmadas. Apuestas, folds, revelados y resultados son
+eventos firmados con sender y payload hash verificables.
+6. El resultado se puede reproducir. Cada mano genera un transcript hash-chain;
+el verificador local recalcula orden, firmas, apuestas, botes, mesa, showdown y
+ganadores.
+7. La manipulación deja rastro. Cambiar transcript, apuesta, ganador, borrar
+eventos o reordenar historial debe romper la hash-chain o la verificación local.
+8. El límite es explícito. Esto protege contra reparto controlado por la
+plataforma, espionaje del relay, cambios silenciosos de historial y clientes
+falsos. No elimina malware, extensiones maliciosas, compartir pantalla,
+contraseñas débiles, phishing ni colusión fuera del protocolo.
+
+### Boucle D'Équité Complète En Français
+
+1. Le code est fixé avant le jeu. Le site officiel publie le Game client CID, le
+source package CID, le SHA256 de l'archive et le `sourceFingerprint`. Tout
+changement de fichier modifie le CID ou l'empreinte.
+2. Le serveur ne distribue pas les cartes. Les navigateurs des joueurs génèrent
+les clés, mélangent, chiffrent et participent au déchiffrement carte par carte.
+Le backend ne crée ni ne stocke le paquet caché en clair.
+3. Le relais est hors de la frontière de confiance. Il transmet seulement les
+messages; il ne possède ni clés privées, ni clés complètes de déchiffrement, ni
+état du paquet en clair.
+4. Les cartes privées restent isolées par joueur. Les événements privés de
+déchiffrement sont envoyés uniquement au joueur concerné. Les cartes publiques
+ne sont libérées qu'au flop, turn, river ou showdown.
+5. Les actions sont signées. Mises, folds, révélations et résultats sont des
+événements signés avec sender et payload hash vérifiables.
+6. Le résultat est rejouable. Chaque main produit un transcript hash-chain; le
+vérificateur local recalcule l'ordre, les signatures, les mises, les pots, le
+board, le showdown et les gagnants.
+7. La falsification devient visible. Modifier le transcript, une mise, le
+gagnant, supprimer un événement ou réordonner l'historique doit casser la
+hash-chain ou la vérification locale.
+8. La limite est explicite. Cela protège contre une distribution contrôlée par
+la plateforme, l'espionnage par le relais, la réécriture silencieuse de
+l'historique et les faux clients. Cela n'élimine pas malware, extensions
+malveillantes, partage d'écran, mots de passe faibles, phishing ou collusion
+hors protocole.
+
+### Vollständige Fairness-Schleife Auf Deutsch
+
+1. Der Code wird vor dem Spiel fixiert. Die offizielle Website veröffentlicht
+Game client CID, Source package CID, Archive SHA256 und `sourceFingerprint`.
+Eine Dateiänderung ändert CID oder Fingerabdruck.
+2. Der Server teilt nicht aus. Die Browser der Spieler erzeugen Schlüssel,
+mischen, verschlüsseln und nehmen an der kartenweisen Entschlüsselung teil. Das
+Backend erzeugt oder speichert keinen versteckten Deck-Klartext.
+3. Der Relay liegt außerhalb der Vertrauensgrenze. Er leitet nur Nachrichten
+weiter; er besitzt keine privaten Schlüssel, keine vollständigen
+Entschlüsselungsschlüssel und keinen Klartext-Deckzustand.
+4. Private Karten bleiben pro Spieler isoliert. Private Entschlüsselungsereignisse
+gehen nur an den vorgesehenen Spieler. Öffentliche Karten werden nur bei Flop,
+Turn, River oder Showdown freigegeben.
+5. Aktionen sind signiert. Bets, Folds, Reveals und Ergebnisse sind signierte
+Ereignisse mit prüfbarem Sender und Payload-Hash.
+6. Ergebnisse sind nachspielbar. Jede Hand erzeugt ein Transcript mit
+Hash-Chain; der lokale Verifier berechnet Reihenfolge, Signaturen, Einsätze,
+Pots, Board, Showdown und Gewinner neu.
+7. Manipulation wird sichtbar. Änderungen an Transcript, Einsatz, Gewinner,
+gelöschten Ereignissen oder Reihenfolge sollten Hash-Chain oder lokale Prüfung
+brechen.
+8. Die Grenze ist klar. Das schützt gegen plattformgesteuertes Austeilen,
+Relay-Spionage, stille History-Änderungen und falsche Clients. Es beseitigt
+nicht Malware, schädliche Erweiterungen, Bildschirmfreigabe, schwache Passwörter,
+Phishing oder Absprachen außerhalb des Protokolls.
+
 ## Local Development
 
 ```bash
