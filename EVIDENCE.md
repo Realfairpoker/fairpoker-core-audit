@@ -13,7 +13,7 @@ deployment credentials, private operations code, or infrastructure secrets.
 - Cloudflare Pages project: fairpoker
 - Pages deployment: https://e21cd4fa.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
-- Game client IPFS CID: bafybeierslujt5bvv3sg6b6bzcdq4htb3opfxiitym6kalj5lpzelkzsrm
+- Game client IPFS CID: bafybeigqgathfgdb4kwsabnc3ocjjkcinzhsyfboxz3yk66mfaplhf52m4
 - Core source audit package IPFS CID: bafkreignv5pvnsrvny7ha2l4duoembydwknr6nyupykbrkko3tooudhjim
 - Core source fingerprint: sha256:ad7e8b014ba49205b8fdbaed48f3a2f917b471f34f7b7d07bbc39c9ac48d79bf
 - Core source archive: fair-poker-source-ad7e8b014ba4.tar.gz
