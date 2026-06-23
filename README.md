@@ -139,6 +139,27 @@ English summary:
 
 Security guide: [fairpoker.app/security](https://fairpoker.app/security)
 
+## Contact And Bug Reports
+
+中文：问题反馈、Bug 提交、安全线索、授权与合规事务，请联系
+[support@fairpoker.app](mailto:support@fairpoker.app)。
+
+English: for support, bug reports, security leads, licensing, or compliance
+matters, contact [support@fairpoker.app](mailto:support@fairpoker.app).
+
+日本語: サポート、バグ報告、セキュリティ情報、ライセンス、
+コンプライアンスは [support@fairpoker.app](mailto:support@fairpoker.app)
+までご連絡ください。
+
+Español: para soporte, bugs, seguridad, licencia o cumplimiento, escribe a
+[support@fairpoker.app](mailto:support@fairpoker.app).
+
+Français: pour support, bugs, sécurité, licence ou conformité, contactez
+[support@fairpoker.app](mailto:support@fairpoker.app).
+
+Deutsch: für Support, Bugmeldungen, Sicherheitshinweise, Lizenz- oder
+Compliance-Fragen: [support@fairpoker.app](mailto:support@fairpoker.app).
+
 ## License And Notices
 
 Fair Poker owned code, UI copy, audit workflow, release metadata, and branding
