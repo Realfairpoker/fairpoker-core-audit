@@ -37,6 +37,52 @@ are written to `release/source/`.
 
 ## Fairness Verification
 
+### Match The Deployed Client To The Public Core Source
+
+中文说明：
+
+1. 确认你打开的牌局客户端 CID 与官网公布的 Game client CID 一致。
+2. 通过不同 IPFS 网关打开同一 CID，应得到同一份前端文件；CID 变化代表文件内容变化。
+3. 下载核心源码审计包，校验压缩包 SHA256。
+4. 解压源码包后重新生成 `sourceFingerprint`，与官网、审计报告和本仓库证据文件中的指纹比对。
+
+English:
+
+1. Confirm the table client CID matches the Game client CID published by the official site.
+2. Opening the same CID through different IPFS gateways should produce the same frontend files; any file change changes the CID.
+3. Download the core source audit package and verify its SHA256.
+4. Extract the package, regenerate `sourceFingerprint`, and compare it with the fingerprint published on the official site, audit report, and evidence file.
+
+```bash
+curl -L -o fair-poker-source.tar.gz \
+  https://ipfs.io/ipfs/bafkreignv5pvnsrvny7ha2l4duoembydwknr6nyupykbrkko3tooudhjim
+
+shasum -a 256 fair-poker-source.tar.gz
+# must equal cdaf5f56ca356e3e70697c1d1c460703b29b1f37147e1418a94edcdcea0ce943
+
+mkdir fair-poker-source
+tar -xzf fair-poker-source.tar.gz -C fair-poker-source --strip-components=1
+cd fair-poker-source
+npm ci
+npm run generate:release-metadata
+grep sourceFingerprint src/generated/releaseMetadata.ts
+```
+
+Expected source fingerprint:
+
+```text
+sha256:ad7e8b014ba49205b8fdbaed48f3a2f917b471f34f7b7d07bbc39c9ac48d79bf
+```
+
+If the archive SHA256 and source fingerprint match, the public core table,
+fairness, shuffle, signing, transcript, and verifier code have not been
+replaced. Scope note: this public repository covers core client-side fairness
+code. Account services, risk controls, deployment credentials, private
+operations code, and backend infrastructure are outside this public source
+release.
+
+### Replay A Table Transcript
+
 Use this flow to reproduce a table result locally.
 
 中文步骤：
