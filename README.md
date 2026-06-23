@@ -119,6 +119,26 @@ Deutsch: Laden Sie das Transcript im Sicherheitspanel herunter und führen Sie d
 
 Web guide: [fairpoker.app/verify-guide](https://fairpoker.app/verify-guide)
 
+## Security Attack Model
+
+中文结论：
+
+- 修改 User-Agent、语言、时区、IP 或游客身份，只会影响脱敏风控信号；不能让攻击者看到别人的底牌。
+- 底牌需要逐牌解密钥。私有发牌阶段的解密事件只发给对应玩家，公开牌只在翻牌、转牌、河牌或摊牌时释放。
+- 中继服务器只转发消息，不持有明文牌堆、玩家私钥或完整解密钥。它可以断开或延迟，但不能单方面控牌或偷牌。
+- 牌局事件由玩家签名，transcript 使用 hash-chain 记录顺序和内容；篡改会在本地复验中暴露。
+- 仍需注意终端风险：木马、远控、恶意浏览器扩展、弱密码、钓鱼和玩家线下串通，不是纯密码学可以完全消除的风险。
+
+English summary:
+
+- Spoofing User-Agent, language, timezone, IP, or guest identity can affect sanitized risk signals, but it does not grant access to other players' private cards.
+- Hole cards require per-card decryption keys. Private dealing decrypt events are sent only to the intended player, while public cards are released only at board reveal or showdown.
+- The relay forwards messages only. It does not hold plaintext deck state, player private keys, or complete decrypt keys. It can disconnect or delay, but cannot unilaterally deal or peek.
+- Player events are signed, and transcripts use a hash-chain over event order and content. Tampering should be exposed by local verification.
+- User-device risks remain: malware, remote control, malicious browser extensions, weak passwords, phishing, and out-of-band collusion cannot be fully eliminated by cryptography alone.
+
+Security guide: [fairpoker.app/security](https://fairpoker.app/security)
+
 ## License And Notices
 
 Fair Poker owned code, UI copy, audit workflow, release metadata, and branding
