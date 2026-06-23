@@ -1,0 +1,30 @@
+{
+  "appName": "Fair Poker",
+  "appVersion": "0.1.0",
+  "createdAt": "2026-06-23T21:06:53.080Z",
+  "sourceFingerprint": "sha256:ad7e8b014ba49205b8fdbaed48f3a2f917b471f34f7b7d07bbc39c9ac48d79bf",
+  "archiveFile": "fair-poker-source-ad7e8b014ba4.tar.gz",
+  "archiveUrl": "https://fairpoker.app/source/fair-poker-source-ad7e8b014ba4.tar.gz",
+  "archiveSha256": "sha256:cdaf5f56ca356e3e70697c1d1c460703b29b1f37147e1418a94edcdcea0ce943",
+  "archiveSha256File": "fair-poker-source-ad7e8b014ba4.tar.gz.sha256",
+  "ipfsCid": "bafkreignv5pvnsrvny7ha2l4duoembydwknr6nyupykbrkko3tooudhjim",
+  "ipfsGatewayUrl": "https://ipfs.io/ipfs/bafkreignv5pvnsrvny7ha2l4duoembydwknr6nyupykbrkko3tooudhjim",
+  "filesCount": 32,
+  "archiveRoot": "fair-poker-source",
+  "buildCommand": "npm ci && npm run build",
+  "publicScope": "core table fairness source only",
+  "officialDomain": "fairpoker.app",
+  "excluded": [
+    "homepage UI",
+    "account backend",
+    "risk engine rules",
+    "deployment secrets",
+    "operations code",
+    "node_modules",
+    "build",
+    "release",
+    "external",
+    "ssh",
+    "src/generated/releaseMetadata.ts"
+  ]
+}

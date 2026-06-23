@@ -1,0 +1,89 @@
+{
+  "name": "fairpoker-app",
+  "version": "0.1.0",
+  "private": true,
+  "homepage": ".",
+  "dependencies": {
+    "@multiavatar/multiavatar": "^1.0.7",
+    "dandelion-mesh": "^1.0.0",
+    "eventemitter3": "^5.0.1",
+    "mental-poker-toolkit": "^1.0.1",
+    "peerjs": "^1.5.4",
+    "phe": "^0.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "scripts": {
+    "generate:release-metadata": "node scripts/generate-release-metadata.js",
+    "prestart": "npm run generate:release-metadata",
+    "start": "react-scripts start",
+    "start:coverage": "REACT_APP_COVERAGE=true react-app-rewired start",
+    "prebuild": "npm run generate:release-metadata",
+    "build": "react-scripts build",
+    "release:source": "npm run generate:release-metadata && node scripts/create-source-release.js",
+    "release:evidence": "node scripts/create-source-evidence.js",
+    "pretest": "npm run generate:release-metadata",
+    "test": "react-scripts test",
+    "release:site": "npm run build && node scripts/create-site-release.js",
+    "verify:transcript": "node scripts/verify-transcript.js",
+    "e2e": "npx playwright test",
+    "eject": "react-scripts eject",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "e2e/**/*.ts"
+        ],
+        "rules": {
+          "testing-library/prefer-screen-queries": "off"
+        }
+      }
+    ]
+  },
+  "jest": {
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}",
+      "!<rootDir>/src/index.tsx",
+      "!<rootDir>/src/setupTests.ts",
+      "!<rootDir>/src/reportWebVitals.ts",
+      "!<rootDir>/src/lib/setup.ts"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "@playwright/test": "^1.49.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/gtag.js": "^0.0.20",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "babel-plugin-istanbul": "^7.0.1",
+    "gh-pages": "^6.1.1",
+    "nyc": "^18.0.0",
+    "react-app-rewired": "^2.2.1",
+    "react-scripts": "^5.0.1",
+    "typescript": "^4.9.5"
+  }
+}
