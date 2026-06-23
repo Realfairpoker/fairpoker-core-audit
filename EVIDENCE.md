@@ -11,7 +11,7 @@ deployment credentials, private operations code, or infrastructure secrets.
 - Project: Fair Poker
 - Public domain: fairpoker.app
 - Cloudflare Pages project: fairpoker
-- Pages deployment: https://1baa0e7a.fairpoker.pages.dev
+- Pages deployment: https://f2b65636.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
 - Game client IPFS CID: bafybeihwpu3ajtggckcxmhals75ei7c3lrlblwsv7pghpktw3mpb2aryuq
 - Core source audit package IPFS CID: bafkreignv5pvnsrvny7ha2l4duoembydwknr6nyupykbrkko3tooudhjim
