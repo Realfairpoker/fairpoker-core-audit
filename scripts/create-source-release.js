@@ -25,6 +25,7 @@ const includedRoots = [
   'src/lib/secureMentalPoker.ts',
   'src/lib/HybridPublicKeyCrypto.ts',
   'src/lib/clientVersion.ts',
+  'src/lib/runtimeReleaseIdentity.ts',
   'src/lib/runtimeCodeSource.ts',
   'src/lib/rules.ts',
   'src/lib/types.ts',

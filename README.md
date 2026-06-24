@@ -87,21 +87,24 @@ a protocol path for the relay to generate the final deck, hold full decrypt
 material, or rewrite a verified transcript.
 
 <!-- FAIR_POKER_RELEASE_EVIDENCE_START -->
-## Current Release Evidence
+## Canonical Release Evidence
 
 - Official site: https://fairpoker.app
-- Game client IPFS CID: bafybeibryjavve62l3cmvqkusybzahq2idh7r6e35drknuscqyzfmdyvza
-- Core source audit package IPFS CID: bafkreihfbddoxiqghneuez3w4zhqidzijnoualvu42ax6k2iw2i3visuhm
-- Core source fingerprint: sha256:3aea3971929119aed5a61a4a50a013dff60e8db4b6abd6425ed9f0ed2f02ffc0
-- Core source archive: fair-poker-source-3aea39719291.tar.gz
-- Core source archive URL: https://fairpoker.app/source/fair-poker-source-3aea39719291.tar.gz
-- Core source archive SHA256: sha256:e508c6eba2063b49426776e64f040f284b5d402eb4e6817f2b48b691baa2543b
-- Release manifest: https://fairpoker.app/source/release.json
+- Canonical machine-readable AI summary: https://fairpoker.app/ai.json
+- Canonical source release manifest: https://fairpoker.app/source/release.json
+- Canonical source archive index: https://fairpoker.app/source/
+- Repository mirror of current release manifest: ./evidence/release.json
+- Repository mirror of current source archive: ./evidence/latest.txt
 - Snyk official public vulnerability report: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
 - Verification guide: https://fairpoker.app/verify-guide.html
 - Full audit report: https://fairpoker.app/audit-report.html
 - Security and attack model: https://fairpoker.app/security.html
 - Support and bug reports: support@fairpoker.app
+
+Release identity values are intentionally not duplicated in this README. Use the
+canonical external endpoints above, or this repository's generated
+`evidence/release.json`, so Game client CID, source package CID, SHA256, and
+source fingerprint have a single source of truth.
 <!-- FAIR_POKER_RELEASE_EVIDENCE_END -->
 
 ## Platform Advantages Comparison

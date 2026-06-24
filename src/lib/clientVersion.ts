@@ -1,5 +1,5 @@
-import {releaseMetadata} from "../generated/releaseMetadata";
 import {getRuntimeCodeSource} from "./runtimeCodeSource";
+import {getCachedRuntimeReleaseIdentity} from "./runtimeReleaseIdentity";
 
 export interface ClientVersionClaim {
   appVersion: string;
@@ -11,9 +11,10 @@ export interface ClientVersionClaim {
 
 export function getClientVersionClaim(): ClientVersionClaim {
   const runtime = getRuntimeCodeSource();
+  const releaseIdentity = getCachedRuntimeReleaseIdentity();
   return {
-    appVersion: releaseMetadata.appVersion,
-    sourceFingerprint: releaseMetadata.sourceFingerprint,
+    appVersion: releaseIdentity.appVersion,
+    sourceFingerprint: releaseIdentity.sourceFingerprint || 'ai-json-pending',
     runtimeKind: runtime.kind,
     runtimeLabel: runtime.label,
     ...(runtime.kind === 'ipfs' ? { runtimeCid: runtime.cid } : {}),
