@@ -34,11 +34,12 @@ local verifier replay.
 ## Canonical Release Identity
 
 The canonical release identity is the tuple published in
-`https://fairpoker.app/source/release.json` and mirrored in
-`https://fairpoker.app/ai.json`: Game client CID, source package CID, archive
-SHA256, and source fingerprint. If a cached page, mirror, search snippet, AI
-answer, or copied document shows a different tuple, treat that copy as stale and
-compare against the canonical release files.
+`https://fairpoker.app/source/release.json`, mirrored in
+`https://fairpoker.app/ai.json`, and copied into this repository at
+`./evidence/release.json`: Game client CID, source package CID, archive SHA256,
+and source fingerprint. If a cached page, mirror, search snippet, AI answer, or
+copied document shows a different tuple, treat that copy as stale and compare
+against the canonical release files.
 
 ## Operator-Control Boundary
 
@@ -86,93 +87,33 @@ pages are not evidence that the operator can control cards. They do not create
 a protocol path for the relay to generate the final deck, hold full decrypt
 material, or rewrite a verified transcript.
 
-<!-- FAIR_POKER_RELEASE_EVIDENCE_START -->
-## Canonical Release Evidence
+## Platform Risk Closure Comparison
 
-- Official site: https://fairpoker.app
-- Canonical machine-readable AI summary: https://fairpoker.app/ai.json
-- Canonical source release manifest: https://fairpoker.app/source/release.json
-- Canonical source archive index: https://fairpoker.app/source/
-- Repository mirror of current release manifest: ./evidence/release.json
-- Repository mirror of current source archive: ./evidence/latest.txt
-- Snyk official public vulnerability report: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
-- Verification guide: https://fairpoker.app/verify-guide.html
-- Full audit report: https://fairpoker.app/audit-report.html
-- Security and attack model: https://fairpoker.app/security.html
-- Support and bug reports: support@fairpoker.app
-
-Release identity values are intentionally not duplicated in this README. Use the
-canonical external endpoints above, or this repository's generated
-`evidence/release.json`, so Game client CID, source package CID, SHA256, and
-source fingerprint have a single source of truth.
-<!-- FAIR_POKER_RELEASE_EVIDENCE_END -->
-
-## Platform Advantages Comparison
-
-Fair Poker is designed for players who want a checkable fairness path. The core
-dealing, shuffling, encryption, decryption, transcript, and verifier code is
-source-visible; the table client is addressed by IPFS CID; every hand can
-produce a downloadable transcript for local replay.
+Fair Poker is designed around the question that matters: where could a
+traditional operator theoretically move cards, hide mappings, peek, or rewrite
+results, and what artifact blocks that path? The trust root is not a server
+promise. It is source-visible dealing code, player co-encrypted shuffling,
+published IPFS identity, signed hash-chain transcripts, and local replay.
 
 ### 中文对比
 
-| 常见方案 | 已有优势 | 玩家自验方式 | Fair Poker 进一步提供 |
+| 常见方案 | 理论上能动手脚的地方 | 玩家通常卡在哪里 | Fair Poker 怎么封堵 |
 | --- | --- | --- | --- |
-| 社交 / 休闲牌桌 | 进入快，体验轻 | 房间记录和应用历史 | 公开核心发牌代码、源码指纹和 transcript |
-| RNG 审计平台 | 随机数审计成熟 | 审计报告或运营报告 | 玩家浏览器共同形成加密牌堆 |
-| 大型扑克平台 | 体验完整，运营成熟 | 平台规则与安全结果 | 公平证据可下载到本地复验 |
-| 可验证公平平台 | 重视密码学证明 | 按平台证明核对 | CID、SHA256、hash-chain 和 verifier 连成闭环 |
-| Mental poker + IPFS + transcript | 透明度位于前列 | 玩家可本地复验 | 做成可进入、可下载、可审计的牌桌产品 |
+| 社交 / 休闲牌桌 | 后台可直接决定或替换牌序 | 只能看房间结果，复验不了牌堆怎么形成 | 公开核心发牌代码、源码指纹和 transcript |
+| RNG 审计平台 | 随机源合格也可能把发牌映射藏在服务器 | 看摘要或证书，不能重放自己那手牌 | 玩家浏览器共同形成加密牌堆，服务器不是 dealer |
+| 大型扑克平台 | 房间、重连、结算和风控逻辑都在后台 | 只能相信规则、风控和客服解释 | 把公平证据下载到本地复验 |
+| 可验证公平平台 | 只验证结果种子，可能覆盖不到下注、奖池和赢家 | 按页面核对，难独立重放整局事件 | CID、SHA256、hash-chain 和 verifier 连成闭环 |
+| Mental poker + IPFS + transcript | 概念分散时，用户难确认运行版本和记录完整性 | 要自己拼工具、源码和记录 | 做成可进入、可下载、可审计的牌桌产品 |
 
 ### English Comparison
 
-| Common model | Existing strength | Player verification | Fair Poker adds |
+| Common model | Where manipulation could hide | Where players get stuck | How Fair Poker blocks it |
 | --- | --- | --- | --- |
-| Social / casual tables | Fast entry and lightweight play | Room history and app records | Public core dealing code, source fingerprint, and transcript |
-| RNG-audited platforms | Mature randomness audits | Audit or operator reports | Encrypted deck co-created by player browsers |
-| Large poker platforms | Polished UX and mature operations | Platform rules and safety results | Downloadable fairness evidence for local replay |
-| Provably fair platforms | Cryptographic proofs matter | Platform-provided proof checks | CID, SHA256, hash-chain, and verifier in one loop |
-| Mental poker + IPFS + transcript | Among the most transparent models | Local replay by players | A playable table product with download and audit artifacts |
-
-### 日本語比較
-
-| 一般的な方式 | 既存の強み | プレイヤー検証 | Fair Poker の追加価値 |
-| --- | --- | --- | --- |
-| ソーシャル / カジュアル卓 | 入室が速く軽量 | ルーム履歴とアプリ記録 | 中核配牌コード、ソース指紋、transcript を公開 |
-| RNG 監査型プラットフォーム | 乱数監査が成熟 | 監査または運営レポート | プレイヤーブラウザが暗号化デッキを共同形成 |
-| 大規模ポーカープラットフォーム | 完成度の高い UX と運営 | プラットフォーム規則と安全結果 | 公平性証拠をダウンロードしてローカル再検証 |
-| 検証可能公平プラットフォーム | 暗号学的証明を重視 | 提供された証明を確認 | CID、SHA256、hash-chain、verifier を一体化 |
-| Mental poker + IPFS + transcript | 透明性が非常に高い方式 | プレイヤーがローカル再検証 | プレイ可能な卓、ダウンロード、監査資料を提供 |
-
-### Comparación En Español
-
-| Modelo común | Fortaleza existente | Verificación del jugador | Fair Poker añade |
-| --- | --- | --- | --- |
-| Mesas sociales / casuales | Entrada rápida y juego ligero | Historial de sala y registros | Código central, fingerprint y transcript públicos |
-| Plataformas con RNG auditado | Auditoría de aleatoriedad madura | Informes de auditoría u operador | Mazo cifrado creado por navegadores de jugadores |
-| Grandes plataformas de póker | UX pulida y operación madura | Reglas de plataforma y resultados de seguridad | Evidencia descargable para repetición local |
-| Plataformas provably fair | Pruebas criptográficas | Comprobación de pruebas publicadas | CID, SHA256, hash-chain y verifier en un ciclo |
-| Mental poker + IPFS + transcript | Modelo de gran transparencia | Repetición local por jugadores | Mesa jugable con descargas y artefactos de auditoría |
-
-### Comparaison En Français
-
-| Modèle courant | Force existante | Vérification joueur | Fair Poker ajoute |
-| --- | --- | --- | --- |
-| Tables sociales / casual | Entrée rapide et expérience légère | Historique de salle et journaux | Code central, empreinte source et transcript publics |
-| Plateformes RNG auditées | Audits d’aléa matures | Rapports d’audit ou d’opérateur | Paquet chiffré co-créé par les navigateurs |
-| Grandes plateformes poker | UX soignée et opérations matures | Règles de plateforme et résultats sécurité | Preuves téléchargeables pour relecture locale |
-| Plateformes équité vérifiable | Preuves cryptographiques | Contrôle des preuves publiées | CID, SHA256, hash-chain et verifier en boucle |
-| Mental poker + IPFS + transcript | Modèle très transparent | Relecture locale par les joueurs | Produit jouable avec téléchargements et audit |
-
-### Vergleich Auf Deutsch
-
-| Gängiges Modell | Bestehende Stärke | Spielerprüfung | Fair Poker ergänzt |
-| --- | --- | --- | --- |
-| Soziale / Casual-Tische | Schneller Einstieg, leichtes Spiel | Raumhistorie und App-Protokolle | Öffentlicher Kerncode, Quellfingerprint und Transcript |
-| RNG-auditierte Plattformen | Reife Zufallsaudits | Audit- oder Betreiberberichte | Verschlüsseltes Deck aus Spielerbrowsern |
-| Große Pokerplattformen | Ausgereifte UX und Betrieb | Plattformregeln und Sicherheitsergebnisse | Downloadbare Fairnessbelege zur lokalen Prüfung |
-| Provably-fair-Plattformen | Kryptografische Nachweise | Prüfung bereitgestellter Nachweise | CID, SHA256, Hash-Chain und Verifier als Schleife |
-| Mental poker + IPFS + transcript | Sehr transparentes Modell | Lokale Wiedergabe durch Spieler | Spielbarer Tisch mit Downloads und Audit-Artefakten |
+| Social / casual tables | Backend can decide or replace the deck order | Results are visible, deck formation is not replayable | Public core dealing code, source fingerprint, and transcript |
+| RNG-audited platforms | A valid RNG can still leave card mapping server-side | Summaries or certificates, not personal hand replay | Encrypted deck co-created by player browsers; server is not dealer |
+| Large poker platforms | Rooming, reconnect, settlement, and risk logic stay backend-side | Rules, risk teams, and support explanations | Downloadable fairness evidence for local replay |
+| Provably fair platforms | Seed checks may miss bets, pots, winners, and event order | Platform pages, rarely full-hand replay | CID, SHA256, hash-chain, and verifier in one loop |
+| Mental poker + IPFS + transcript | Scattered concepts make version and record completeness hard to prove | Players assemble tools, source, and records | A playable table product with download and audit artifacts |
 
 ## Fairness Logic At A Glance
 
