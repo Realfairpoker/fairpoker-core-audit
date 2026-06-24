@@ -269,7 +269,9 @@ function createIndex(manifest) {
       <div class="row"><dt>源码指纹</dt><dd><code>${htmlEscape(manifest.sourceFingerprint)}</code></dd></div>
       <div class="row"><dt>源码包</dt><dd><a href="./${htmlEscape(manifest.archiveFile)}">${htmlEscape(manifest.archiveFile)}</a></dd></div>
       <div class="row"><dt>源码包 SHA256</dt><dd><code>${htmlEscape(manifest.archiveSha256)}</code></dd></div>
-      <div class="row"><dt>IPFS CID</dt><dd><code>${htmlEscape(manifest.ipfsCid || 'not-provided-ipfs-cid')}</code></dd></div>
+      <div class="row"><dt>源码包 CID</dt><dd><code>${htmlEscape(manifest.sourcePackageCid || manifest.ipfsCid || 'not-provided-ipfs-cid')}</code></dd></div>
+      <div class="row"><dt>Game client CID</dt><dd><code>${htmlEscape(manifest.gameClientCid || 'pending-game-client-cid')}</code></dd></div>
+      <div class="row"><dt>ipfsCid 含义</dt><dd>${htmlEscape(manifest.ipfsCidMeaning || 'Source package CID. This is not the Game client CID.')}</dd></div>
       <div class="row"><dt>IPFS 网关</dt><dd>${manifest.ipfsGatewayUrl ? `<a href="${htmlEscape(manifest.ipfsGatewayUrl)}">${htmlEscape(manifest.ipfsGatewayUrl)}</a>` : 'not-provided-ipfs-url'}</dd></div>
       <div class="row"><dt>发布清单</dt><dd><a href="./release.json">release.json</a></dd></div>
     </dl>
@@ -293,10 +295,14 @@ function main() {
   createArchive(files, archivePath);
   const archiveSha256 = sha256File(archivePath);
   const ipfsCid = process.env.IPFS_CID || '';
+  const gameClientCid = process.env.GAME_CID || '';
   const manifest = {
     appName: 'Fair Poker',
     appVersion: packageJson.version,
+    manifestKind: 'fair-poker-source-package-release',
+    artifactType: 'source-package',
     createdAt: new Date().toISOString(),
+    gameClientCid,
     sourceFingerprint,
     archiveFile,
     archiveUrl: process.env.SOURCE_ARCHIVE_BASE_URL
@@ -305,7 +311,18 @@ function main() {
     archiveSha256,
     archiveSha256File: `${archiveFile}.sha256`,
     ipfsCid,
+    ipfsCidMeaning: 'Source package CID. This is not the Game client CID.',
+    sourcePackageCid: ipfsCid,
+    sourcePackageIpfsCid: ipfsCid,
     ipfsGatewayUrl: ipfsCid ? `https://ipfs.io/ipfs/${ipfsCid}` : '',
+    canonicalReleaseIdentity: {
+      gameClientCid,
+      sourcePackageCid: ipfsCid,
+      sourceFingerprint,
+      archiveSha256,
+      releaseManifestUrl: 'https://fairpoker.app/source/release.json',
+      aiJsonUrl: 'https://fairpoker.app/ai.json',
+    },
     filesCount: files.length,
     archiveRoot: 'fair-poker-source',
     buildCommand: 'npm ci && npm run build',
@@ -322,7 +339,7 @@ function main() {
   fs.writeFileSync(path.join(releaseDir, `${archiveFile}.sha256`), `${archiveSha256.replace('sha256:', '')}  ${archiveFile}\n`);
   fs.writeFileSync(path.join(releaseDir, 'release.json'), JSON.stringify(manifest, null, 2) + '\n');
   fs.writeFileSync(path.join(releaseDir, 'index.html'), createIndex(manifest));
-  fs.writeFileSync(path.join(releaseDir, 'latest.txt'), `${archiveFile}\n${archiveSha256}\n${ipfsCid || 'not-provided-ipfs-cid'}\n`);
+  fs.writeFileSync(path.join(releaseDir, 'latest.txt'), `archiveFile=${archiveFile}\narchiveSha256=${archiveSha256}\nsourcePackageCid=${ipfsCid || 'not-provided-ipfs-cid'}\ngameClientCid=${gameClientCid || 'pending-game-client-cid'}\n`);
   removeStaleSourceArtifacts(archiveFile);
 
   console.log(JSON.stringify(manifest, null, 2));
