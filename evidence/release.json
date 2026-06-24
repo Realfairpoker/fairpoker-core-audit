@@ -14,6 +14,14 @@
   "buildCommand": "npm ci && npm run build",
   "evidenceScope": "verifiable table fairness source package",
   "officialDomain": "fairpoker.app",
+  "thirdPartySoftwareSecurity": {
+    "provider": "Snyk",
+    "providerDescription": "Snyk is an international developer security platform for code, open-source dependency, container, cloud, and AI application security risk.",
+    "officialPublicReportUrl": "https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit",
+    "officialBadgeUrl": "https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit/badge.svg",
+    "publicResult": "The Snyk-hosted public report states that no vulnerabilities were found in fairpoker-app and that no known vulnerabilities were found.",
+    "evidenceBoundary": "Software-security and dependency-risk evidence only; fairness remains verified by Game client CID, source package CID/SHA256/sourceFingerprint, signed transcript hash-chain, and local verifier replay."
+  },
   "packageContents": [
     "mental-poker dealing and shuffle flow",
     "table state and Texas Holdem settlement logic",

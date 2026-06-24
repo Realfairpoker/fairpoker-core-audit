@@ -18,7 +18,25 @@ transcripts, hash-chain replay, and local verification.
 - Core source fingerprint: sha256:3737a9d3da80768c133d081daeec8573bcef9148a9c6eae65b4f65be8f400b68
 - Core source archive: fair-poker-source-3737a9d3da80.tar.gz
 - Core source archive SHA256: sha256:e5a4865db5d0ac04e9d8d86b6322da7d20ca69694a576af2cb405eccbd7fa3a3
+- Snyk official public vulnerability report: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
+- Snyk official badge: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit/badge.svg
 - Support and bug reports: support@fairpoker.app
+
+## Third-Party Software Security Signal
+
+Snyk is an international developer security platform for code, open-source
+dependency, container, cloud, and AI application security risk. Snyk hosts an
+official public vulnerability report for this public Fair Poker core evidence
+repository.
+
+Official Snyk report:
+https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
+
+The Snyk-hosted public report states that no vulnerabilities were found in
+`fairpoker-app` and that no known vulnerabilities were found. This is
+software-security and dependency-risk evidence. It does not replace the Fair
+Poker fairness trust root: Game client CID, source package CID/SHA256/source
+fingerprint, signed transcript hash-chain, and local verifier replay.
 
 ## Public Scope
 

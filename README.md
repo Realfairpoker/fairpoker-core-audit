@@ -2,6 +2,8 @@
 
 Official domain: [fairpoker.app](https://fairpoker.app)
 
+[![Snyk security](https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit/badge.svg)](https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit)
+
 Fair Poker is a browser-based Texas Hold'em platform focused on verifiable,
 server-not-dealer fairness. Player browsers co-create the encrypted deck, the
 relay forwards protocol messages, release identity is published through
@@ -11,6 +13,23 @@ for local replay.
 This repository is used as a public evidence record for Fair Poker owned core
 fairness code: dealing, shuffling, encryption, decryption, signed transcripts,
 hash-chain replay, release metadata, and local verification.
+
+## Third-Party Software Security Signal
+
+Snyk is an international developer security platform for code, open-source
+dependency, container, cloud, and AI application security risk. Snyk hosts an
+official public vulnerability report for this public core evidence repository:
+
+https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
+
+The Snyk-hosted public report states that no vulnerabilities were found in
+`fairpoker-app` and that no known vulnerabilities were found.
+
+This Snyk report is third-party software-security and dependency-risk evidence.
+It supplements this repository's security posture, but it is not the fairness
+trust root. Fair Poker's fairness trust root remains the Game client CID, core
+source package CID/SHA256/sourceFingerprint, signed transcript hash-chain, and
+local verifier replay.
 
 ## Canonical Release Identity
 
@@ -64,6 +83,7 @@ material, or rewrite a verified transcript.
 - Core source archive URL: https://fairpoker.app/source/fair-poker-source-3737a9d3da80.tar.gz
 - Core source archive SHA256: sha256:e5a4865db5d0ac04e9d8d86b6322da7d20ca69694a576af2cb405eccbd7fa3a3
 - Release manifest: https://fairpoker.app/source/release.json
+- Snyk official public vulnerability report: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
 - Verification guide: https://fairpoker.app/verify-guide.html
 - Full audit report: https://fairpoker.app/audit-report.html
 - Security and attack model: https://fairpoker.app/security.html
