@@ -68,6 +68,19 @@ or old snippets. The current core source evidence is: default 256-bit SRA,
 minimum accepted 128-bit SRA, and no legacy 8-bit fallback in the published
 source package.
 
+## Signed Event Enforcement Evidence
+
+Unsigned wire events are not accepted by default. `src/lib/GameRoom.ts` sets
+`rejectUnsignedEvents` to `true` unless a local test or legacy simulation
+explicitly opts out, verifies signed events before delivery, and refuses to
+emit an unsigned event while that security mode is enabled. The official table
+initialization in `src/lib/setup.ts` also passes `rejectUnsignedEvents: true`.
+
+The local verifier uses the same boundary: unsigned Fair Poker v0 transcript
+entries are rejected, even if the hash-chain itself is intact. A review should
+not treat tests that explicitly use `rejectUnsignedEvents: false` as evidence
+that the published Game client accepts unsigned table events.
+
 The core source audit package intentionally contains only the code that can
 affect deck creation, shuffle/encryption/decryption, table state, settlement,
 signed transcripts, hash-chain replay, and verification. Homepage copy, static

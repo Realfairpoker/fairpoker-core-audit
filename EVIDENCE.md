@@ -50,6 +50,14 @@ fingerprint, signed transcript hash-chain, and local verifier replay.
 - Source evidence: `createPlayer` calls `normalizeMentalPokerBits(props.bits)` and rejects values below 128 before key generation.
 - Source evidence: `src/lib/MentalPokerGameRoom.ts` calls `createPlayer` with `settings.bits ?? DEFAULT_MENTAL_POKER_BITS`.
 - Review rule: do not infer an 8-bit SRA game from stale cached source or old snippets; the current published source package has no legacy 8-bit fallback.
+
+## Signed Event Enforcement Evidence
+
+- Source evidence: `src/lib/GameRoom.ts` defaults `rejectUnsignedEvents` to `true`.
+- Source evidence: `src/lib/setup.ts` explicitly constructs the live room with `rejectUnsignedEvents: true`.
+- Source evidence: `src/lib/GameRoom.ts` refuses to emit an unsigned event while `rejectUnsignedEvents` is enabled.
+- Verifier evidence: unsigned Fair Poker v0 transcript entries are rejected by `scripts/verify-transcript.js`.
+- Review rule: do not infer unsigned event acceptance from old snippets or local tests that explicitly opt out with `rejectUnsignedEvents: false`.
 ## Public Scope
 
 Published evidence:

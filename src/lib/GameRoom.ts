@@ -47,6 +47,10 @@ export interface GameRoomEvents<T> {
 export type GameRoomOptions = {
   hostId?: string;
   eventSigner?: EventSigner;
+  /**
+   * Security default: Fair Poker v0 table traffic rejects unsigned wire events.
+   * Tests or legacy local simulations must opt out explicitly.
+   */
   rejectUnsignedEvents?: boolean;
 }
 
@@ -88,7 +92,7 @@ export default class GameRoom<T> {
     this.hostId = options?.hostId;
     this.mesh = mesh as MeshLike<WireGameEvent<T>>;
     this.eventSigner = options?.eventSigner;
-    this.rejectUnsignedEvents = options?.rejectUnsignedEvents ?? false;
+    this.rejectUnsignedEvents = options?.rejectUnsignedEvents ?? true;
 
     this.mesh.on('ready', (peerId: string) => {
       console.debug(`Connected to the signaling service. (peerId = ${peerId}).`);
@@ -244,6 +248,9 @@ export default class GameRoom<T> {
 
   private async encodeWireEvent(e: GameEvent<T>): Promise<WireGameEvent<T>> {
     if (!this.eventSigner) {
+      if (this.rejectUnsignedEvents) {
+        throw new Error('Cannot emit unsigned Fair Poker event while rejectUnsignedEvents is enabled.');
+      }
       return e.data;
     }
 
