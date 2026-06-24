@@ -2,6 +2,7 @@ import {GameEvent, GameRoomEvents, GameRoomStatus} from "./GameRoom";
 import {
   createPlayer,
   decodeStandardCard,
+  DEFAULT_MENTAL_POKER_BITS,
   DecryptionKey,
   EncodedDeck,
   encodeStandardCard,
@@ -422,7 +423,7 @@ export default class MentalPokerGameRoom {
       console.debug(`Creating mental poker player ${myPeerId}`);
       const playerPromise = createPlayer({
         cards: CARDS,
-        bits: settings.bits ?? 256,
+        bits: settings.bits ?? DEFAULT_MENTAL_POKER_BITS,
       });
       roundData.playerDeferred(myPeerId).resolve(playerPromise);
 
@@ -461,7 +462,7 @@ export default class MentalPokerGameRoom {
     const playerPromise = createPlayer({
       cards: CARDS,
       publicKey,
-      bits: settings.bits ?? 256,
+      bits: settings.bits ?? DEFAULT_MENTAL_POKER_BITS,
     });
     roundData.playerDeferred(participant).resolve(playerPromise);
 

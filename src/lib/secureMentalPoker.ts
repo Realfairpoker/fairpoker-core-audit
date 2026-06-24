@@ -20,6 +20,22 @@ export type StandardDeck = StandardCard[];
 const SUITS: Suit[] = ['Heart', 'Diamond', 'Club', 'Spade'];
 const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
 
+export const DEFAULT_MENTAL_POKER_BITS = 256;
+export const MIN_MENTAL_POKER_BITS = 128;
+
+export function normalizeMentalPokerBits(bits?: number): number {
+  const normalizedBits = bits ?? DEFAULT_MENTAL_POKER_BITS;
+  if (!Number.isInteger(normalizedBits)) {
+    throw new Error(`Mental poker SRA bits must be an integer, got ${normalizedBits}`);
+  }
+  if (normalizedBits < MIN_MENTAL_POKER_BITS) {
+    throw new Error(
+      `Mental poker SRA bits must be at least ${MIN_MENTAL_POKER_BITS}, got ${normalizedBits}`
+    );
+  }
+  return normalizedBits;
+}
+
 export function getStandard52Deck(): StandardDeck {
   const standardDeck: StandardDeck = [];
   for (const suit of SUITS) {
@@ -101,7 +117,7 @@ export async function createPlayer(props: {
   publicKey?: PublicKey;
   bits?: number;
 }): Promise<Player> {
-  const bits = props.bits ?? 8;
+  const bits = normalizeMentalPokerBits(props.bits);
   const mainSraKey = await generateShamirRivestAdleman({
     bits,
     keys: props.publicKey,

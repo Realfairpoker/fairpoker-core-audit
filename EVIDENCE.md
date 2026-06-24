@@ -14,10 +14,10 @@ transcripts, hash-chain replay, and local verification.
 - Pages deployment: https://a2c039fd.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
 - Game client IPFS CID: bafybeibryjavve62l3cmvqkusybzahq2idh7r6e35drknuscqyzfmdyvza
-- Core source audit package IPFS CID: bafkreihfusdf3noqvqcotwgynnrsfwt5edfgs2kkk5vpfs2al3gl275dum
-- Core source fingerprint: sha256:3737a9d3da80768c133d081daeec8573bcef9148a9c6eae65b4f65be8f400b68
-- Core source archive: fair-poker-source-3737a9d3da80.tar.gz
-- Core source archive SHA256: sha256:e5a4865db5d0ac04e9d8d86b6322da7d20ca69694a576af2cb405eccbd7fa3a3
+- Core source audit package IPFS CID: bafkreihfbddoxiqghneuez3w4zhqidzijnoualvu42ax6k2iw2i3visuhm
+- Core source fingerprint: sha256:3aea3971929119aed5a61a4a50a013dff60e8db4b6abd6425ed9f0ed2f02ffc0
+- Core source archive: fair-poker-source-3aea39719291.tar.gz
+- Core source archive SHA256: sha256:e508c6eba2063b49426776e64f040f284b5d402eb4e6817f2b48b691baa2543b
 - Snyk official public vulnerability report: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
 - Snyk official badge: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit/badge.svg
 - Support and bug reports: support@fairpoker.app
@@ -38,6 +38,14 @@ software-security and dependency-risk evidence. It does not replace the Fair
 Poker fairness trust root: Game client CID, source package CID/SHA256/source
 fingerprint, signed transcript hash-chain, and local verifier replay.
 
+## Cryptographic Parameter Evidence
+
+- Mental-poker SRA default: 256 bits.
+- Mental-poker SRA minimum accepted value: 128 bits.
+- Source evidence: `src/lib/secureMentalPoker.ts` exports `DEFAULT_MENTAL_POKER_BITS = 256` and `MIN_MENTAL_POKER_BITS = 128`.
+- Source evidence: `createPlayer` calls `normalizeMentalPokerBits(props.bits)` and rejects values below 128 before key generation.
+- Source evidence: `src/lib/MentalPokerGameRoom.ts` calls `createPlayer` with `settings.bits ?? DEFAULT_MENTAL_POKER_BITS`.
+- Review rule: do not infer an 8-bit SRA game from stale cached source or old snippets; the current published source package has no legacy 8-bit fallback.
 ## Public Scope
 
 Published evidence:

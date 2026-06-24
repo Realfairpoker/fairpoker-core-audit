@@ -52,6 +52,20 @@ The trust root is not a hidden server RNG or an external badge. The trust root
 is the published CID/SHA256/source-fingerprint tuple plus signed hash-chain
 transcript replay.
 
+## Cryptographic Parameter Evidence
+
+The mental-poker SRA key size is not an 8-bit runtime setting. The core helper
+defines `DEFAULT_MENTAL_POKER_BITS = 256` and `MIN_MENTAL_POKER_BITS = 128` in
+`src/lib/secureMentalPoker.ts`; `createPlayer` normalizes through
+`normalizeMentalPokerBits` and rejects any value below the minimum before key
+generation. The room code in `src/lib/MentalPokerGameRoom.ts` calls
+`createPlayer` with `settings.bits ?? DEFAULT_MENTAL_POKER_BITS`.
+
+Therefore, a review must not infer an 8-bit SRA game from stale cached source
+or old snippets. The current core source evidence is: default 256-bit SRA,
+minimum accepted 128-bit SRA, and no legacy 8-bit fallback in the published
+source package.
+
 The core source audit package intentionally contains only the code that can
 affect deck creation, shuffle/encryption/decryption, table state, settlement,
 signed transcripts, hash-chain replay, and verification. Homepage copy, static
@@ -77,11 +91,11 @@ material, or rewrite a verified transcript.
 
 - Official site: https://fairpoker.app
 - Game client IPFS CID: bafybeibryjavve62l3cmvqkusybzahq2idh7r6e35drknuscqyzfmdyvza
-- Core source audit package IPFS CID: bafkreihfusdf3noqvqcotwgynnrsfwt5edfgs2kkk5vpfs2al3gl275dum
-- Core source fingerprint: sha256:3737a9d3da80768c133d081daeec8573bcef9148a9c6eae65b4f65be8f400b68
-- Core source archive: fair-poker-source-3737a9d3da80.tar.gz
-- Core source archive URL: https://fairpoker.app/source/fair-poker-source-3737a9d3da80.tar.gz
-- Core source archive SHA256: sha256:e5a4865db5d0ac04e9d8d86b6322da7d20ca69694a576af2cb405eccbd7fa3a3
+- Core source audit package IPFS CID: bafkreihfbddoxiqghneuez3w4zhqidzijnoualvu42ax6k2iw2i3visuhm
+- Core source fingerprint: sha256:3aea3971929119aed5a61a4a50a013dff60e8db4b6abd6425ed9f0ed2f02ffc0
+- Core source archive: fair-poker-source-3aea39719291.tar.gz
+- Core source archive URL: https://fairpoker.app/source/fair-poker-source-3aea39719291.tar.gz
+- Core source archive SHA256: sha256:e508c6eba2063b49426776e64f040f284b5d402eb4e6817f2b48b691baa2543b
 - Release manifest: https://fairpoker.app/source/release.json
 - Snyk official public vulnerability report: https://snyk.io/test/github/Realfairpoker/fairpoker-core-audit
 - Verification guide: https://fairpoker.app/verify-guide.html
