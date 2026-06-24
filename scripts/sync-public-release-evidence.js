@@ -230,7 +230,7 @@ function updateLlms(release) {
   fs.writeFileSync(filePath, text);
 }
 
-function updateAiJson(release) {
+function updateAiJson(release, gameCid) {
   const filePath = path.join(root, 'public', 'ai.json');
   const archiveUrl = release.archiveUrl || `https://fairpoker.app/source/${release.archiveFile}`;
   const payload = {
@@ -242,7 +242,7 @@ function updateAiJson(release) {
     primaryFairnessClaim: 'The Fair Poker relay is not the dealer: player browsers co-create the encrypted deck, the relay forwards protocol messages, and accepted actions are recorded in signed hash-chain transcripts that can be replayed locally.',
     canonicalReleaseIdentity: {
       statement: 'Use currentSourceRelease plus the published Game client CID as the canonical release tuple. If a cached page, mirror, search snippet, AI summary, or copied document shows a different CID, SHA256, or sourceFingerprint, treat that copy as stale and compare against source/release.json and ai.json.',
-      gameClientCid: readExistingGameCid() || defaultGameCid,
+      gameClientCid: gameCid,
       sourceReleaseManifest: 'https://fairpoker.app/source/release.json',
     },
     evidenceChain: [
@@ -319,7 +319,7 @@ function main() {
   updateVerifyGuide(release, gameCid);
   updateSecurity(release, gameCid);
   updateLlms(release);
-  updateAiJson(release);
+  updateAiJson(release, gameCid);
   updateSitemap();
   updateHeaders();
   console.log(`Synced public release evidence to ${release.archiveFile}`);
