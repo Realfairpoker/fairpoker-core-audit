@@ -183,7 +183,7 @@ function createIndex(manifest) {
 <body>
   <main>
     <h1>Fair Poker Core Source Release</h1>
-    <p>官方域名为 fairpoker.app。此处只公开核心牌局审计源码包、SHA256 和 IPFS CID；账号、风控、部署、密钥和后端运营代码不在公开范围内。文件内容只要被改动一个字，SHA256 和 CID 都会变化。</p>
+    <p>官方域名为 fairpoker.app。此处公开核心发牌、洗牌、加密、解密、transcript 和 verifier 审计源码包、SHA256 和 IPFS CID。文件内容只要被改动一个字，SHA256 和 CID 都会变化。</p>
     <dl>
       <div class="row"><dt>App</dt><dd>${htmlEscape(manifest.appName)} v${htmlEscape(manifest.appVersion)}</dd></div>
       <div class="row"><dt>源码指纹</dt><dd><code>${htmlEscape(manifest.sourceFingerprint)}</code></dd></div>
@@ -230,7 +230,7 @@ function main() {
     buildCommand: 'npm ci && npm run build',
     publicScope: 'core table fairness source only',
     officialDomain: 'fairpoker.app',
-    excluded: ['homepage UI', 'account backend', 'risk engine rules', 'deployment secrets', 'operations code', 'node_modules', 'build', 'release', 'external', 'ssh', 'src/generated/releaseMetadata.ts'],
+    excluded: ['homepage UI', 'runtime service configuration', 'environment secrets', 'operator tooling', 'node_modules', 'build', 'release', 'external', 'ssh', 'src/generated/releaseMetadata.ts'],
   };
 
   fs.writeFileSync(path.join(releaseDir, `${archiveFile}.sha256`), `${archiveSha256.replace('sha256:', '')}  ${archiveFile}\n`);

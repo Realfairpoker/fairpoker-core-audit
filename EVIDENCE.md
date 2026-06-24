@@ -2,22 +2,22 @@
 
 Official domain: https://fairpoker.app
 
-This repository preserves Fair Poker core table fairness source for audit and
-evidence. It does not publish account backend code, risk engine rules,
-deployment credentials, private operations code, or infrastructure secrets.
+This repository preserves Fair Poker core fairness source for audit and
+evidence: dealing, shuffling, encryption, decryption, signed transcripts,
+hash-chain replay, and local verification.
 
 ## Release Evidence
 
 - Project: Fair Poker
 - Public domain: fairpoker.app
 - Cloudflare Pages project: fairpoker
-- Pages deployment: https://30c45a62.fairpoker.pages.dev
+- Pages deployment: https://a3be6093.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
 - Game client IPFS CID: bafybeihwpu3ajtggckcxmhals75ei7c3lrlblwsv7pghpktw3mpb2aryuq
-- Core source audit package IPFS CID: bafkreignv5pvnsrvny7ha2l4duoembydwknr6nyupykbrkko3tooudhjim
-- Core source fingerprint: sha256:ad7e8b014ba49205b8fdbaed48f3a2f917b471f34f7b7d07bbc39c9ac48d79bf
-- Core source archive: fair-poker-source-ad7e8b014ba4.tar.gz
-- Core source archive SHA256: sha256:cdaf5f56ca356e3e70697c1d1c460703b29b1f37147e1418a94edcdcea0ce943
+- Core source audit package IPFS CID: bafkreif6iuq2a74abuxikybdplut4zuzlhwlmo3wj7bge5oblk5zegnmey
+- Core source fingerprint: sha256:478fc0cd3d07081340f997243a8ebd2a614c13a3510374cca9e00a8e3462997b
+- Core source archive: fair-poker-source-478fc0cd3d07.tar.gz
+- Core source archive SHA256: sha256:be4521a07f800d2e8560237ae93e669959ecb63b764fc26275c15abb9219ac26
 - Support and bug reports: support@fairpoker.app
 
 ## Public Scope
@@ -30,13 +30,8 @@ Published for audit:
 - Texas Holdem table state and replay logic
 - source release scripts and verifier script
 
-Not included in this public audit repository:
-
-- account backend implementation
-- private risk scoring rules
-- deployment secrets or credentials
-- private operations code
-- infrastructure administration code
+The public audit package focuses on the code path players can verify directly:
+how the deck is created, encrypted, shuffled, revealed, recorded, and replayed.
 
 ## License Boundary
 
