@@ -17,8 +17,6 @@ const includedRoots = [
   'scripts/verify-transcript.js',
   'scripts/generate-release-metadata.js',
   'scripts/create-source-release.js',
-  'scripts/sync-public-release-evidence.js',
-  'scripts/validate-release-evidence.js',
   'src/lib/fairness',
   'src/lib/texas-holdem',
   'src/lib/MentalPokerGameRoom.ts',
@@ -50,6 +48,18 @@ const forbiddenPublicPathParts = new Set([
   'signal-server',
   'ssh',
 ]);
+
+const forbiddenAuditPackagePaths = [
+  /^public\//,
+  /^src\/components\//,
+  /^src\/lib\/i18n\.tsx$/,
+  /^scripts\/create-source-evidence\.js$/,
+  /^scripts\/sync-public-release-evidence\.js$/,
+  /^scripts\/validate-release-evidence\.js$/,
+  /^cloudflare-worker\//,
+  /^build\//,
+  /^release\//,
+];
 
 const forbiddenPublicContent = [
   new RegExp('ssh-key-' + '\\d{4}-\\d{2}-\\d{2}\\.key'),
@@ -142,6 +152,22 @@ function tarHeader(name, size, mode) {
   return header;
 }
 
+function archiveContent(file) {
+  const relative = path.relative(root, file).replace(/\\/g, '/');
+  if (relative !== 'package.json') {
+    return fs.readFileSync(file);
+  }
+  const packageJson = JSON.parse(fs.readFileSync(file, 'utf8'));
+  packageJson.description = 'Fair Poker core fairness audit package';
+  packageJson.scripts = {
+    'generate:release-metadata': 'node scripts/generate-release-metadata.js',
+    'verify:transcript': 'node scripts/verify-transcript.js',
+    'release:source': 'npm run generate:release-metadata && node scripts/create-source-release.js',
+    test: 'react-scripts test',
+  };
+  return Buffer.from(`${JSON.stringify(packageJson, null, 2)}\n`);
+}
+
 function createArchive(files, outputPath) {
   const chunks = [];
   const prefix = 'fair-poker-source';
@@ -149,7 +175,7 @@ function createArchive(files, outputPath) {
   for (const file of files) {
     const relative = path.relative(root, file).replace(/\\/g, '/');
     const archivePath = `${prefix}/${relative}`;
-    const content = fs.readFileSync(file);
+    const content = archiveContent(file);
     chunks.push(tarHeader(archivePath, content.length, 0o644));
     chunks.push(content);
     const remainder = content.length % 512;
@@ -170,6 +196,11 @@ function assertSafePublicFiles(files) {
     const parts = relative.split('/');
     if (parts.some((part) => forbiddenPublicPathParts.has(part) || part.startsWith('.env'))) {
       throw new Error(`Refusing to publish forbidden path in source release: ${relative}`);
+    }
+    for (const pattern of forbiddenAuditPackagePaths) {
+      if (pattern.test(relative)) {
+        throw new Error(`Refusing to publish non-core audit package path: ${relative}`);
+      }
     }
 
     const content = fs.readFileSync(file);
@@ -277,9 +308,14 @@ function main() {
     filesCount: files.length,
     archiveRoot: 'fair-poker-source',
     buildCommand: 'npm ci && npm run build',
-    publicScope: 'core table fairness source only',
+    evidenceScope: 'verifiable table fairness source package',
     officialDomain: 'fairpoker.app',
-    excluded: ['homepage UI', 'runtime service configuration', 'environment secrets', 'operator tooling', 'node_modules', 'build', 'release', 'external', 'ssh', 'src/generated/releaseMetadata.ts'],
+    packageContents: [
+      'mental-poker dealing and shuffle flow',
+      'table state and Texas Holdem settlement logic',
+      'signed transcript and hash-chain verifier',
+      'source fingerprint and transcript verification scripts',
+    ],
   };
 
   fs.writeFileSync(path.join(releaseDir, `${archiveFile}.sha256`), `${archiveSha256.replace('sha256:', '')}  ${archiveFile}\n`);

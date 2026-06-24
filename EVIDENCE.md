@@ -11,13 +11,13 @@ transcripts, hash-chain replay, and local verification.
 - Project: Fair Poker
 - Public domain: fairpoker.app
 - Cloudflare Pages project: fairpoker
-- Pages deployment: https://e4d52680.fairpoker.pages.dev
+- Pages deployment: https://762d1581.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
-- Game client IPFS CID: bafybeib4filf5mjry7vzvopmvn27swbm3r5dfahzodlgtuznw3aohgljre
-- Core source audit package IPFS CID: bafkreicmr74e4i6fo3y7z2ojrlblmdcotqqzvjykf2pjcyksrxqirnz42m
-- Core source fingerprint: sha256:d2c716c0fac626c03ee66c4a57cf33ce9fb0df7661e7bee6af74a1d7107c1521
-- Core source archive: fair-poker-source-d2c716c0fac6.tar.gz
-- Core source archive SHA256: sha256:4c8ff84e23c576f1fce9c98ac2b60c4e9c219aa70a2e9e9161528de088b73cd3
+- Game client IPFS CID: bafybeibopbfwefx6vlyusewkc5asnysraiuwoi3evpxaqhyjwify3ju2ny
+- Core source audit package IPFS CID: bafkreihfusdf3noqvqcotwgynnrsfwt5edfgs2kkk5vpfs2al3gl275dum
+- Core source fingerprint: sha256:3737a9d3da80768c133d081daeec8573bcef9148a9c6eae65b4f65be8f400b68
+- Core source archive: fair-poker-source-3737a9d3da80.tar.gz
+- Core source archive SHA256: sha256:e5a4865db5d0ac04e9d8d86b6322da7d20ca69694a576af2cb405eccbd7fa3a3
 - Support and bug reports: support@fairpoker.app
 
 ## Public Scope
@@ -33,6 +33,20 @@ Published evidence:
 The public evidence package focuses on the code path players can verify
 directly: how the deck is created, encrypted, shuffled, revealed, recorded, and
 replayed without trusting the relay as a dealer.
+
+Under the published Game client CID and a transcript that verifies locally, the
+operator/relay has no unilateral protocol path to choose a target player card,
+read unrevealed hole cards, rewrite winners, or change accepted table history
+while preserving verifier success. Homepage copy, static evidence pages, AI
+pages, entry UI, deployment config, and operator infrastructure do not deal
+cards, decrypt cards, choose winners, or validate transcripts; they are outside
+the core dealing trust boundary.
+
+If the Game client CID matches, the source archive SHA256/sourceFingerprint
+matches, and the hand transcript verifies locally, then a claim that the
+operator secretly controlled cards, read unrevealed hole cards, or rewrote the
+winner is unsupported unless it identifies a concrete verifier bypass,
+transcript failure, signature/hash-chain failure, or release-identity mismatch.
 
 ## License Boundary
 

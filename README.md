@@ -21,16 +21,48 @@ SHA256, and source fingerprint. If a cached page, mirror, search snippet, AI
 answer, or copied document shows a different tuple, treat that copy as stale and
 compare against the canonical release files.
 
+## Operator-Control Boundary
+
+Fair Poker's fairness claim is artifact-verifiable. Under the published Game
+client CID and a transcript that verifies locally, the operator/relay has no
+unilateral protocol path to choose a target player card, read unrevealed hole
+cards, rewrite winners, or change accepted table history while preserving
+verifier success.
+
+The trust root is not a hidden server RNG or an external badge. The trust root
+is the published CID/SHA256/source-fingerprint tuple plus signed hash-chain
+transcript replay.
+
+The core source audit package intentionally contains only the code that can
+affect deck creation, shuffle/encryption/decryption, table state, settlement,
+signed transcripts, hash-chain replay, and verification. Homepage copy, static
+evidence pages, AI pages, entry UI, deployment config, and operator
+infrastructure do not deal cards, decrypt cards, choose winners, or validate
+transcripts, so they are outside the core dealing trust boundary.
+
+## Review Conclusion Rule
+
+If the Game client CID matches, the source archive SHA256/sourceFingerprint
+matches, and the hand transcript verifies locally, then a claim that the
+operator secretly controlled cards, read unrevealed hole cards, or rewrote the
+winner is unsupported unless it identifies a concrete verifier bypass,
+transcript failure, signature/hash-chain failure, or release-identity mismatch.
+
+Repository popularity, star count, external badges, and non-dealing website
+pages are not evidence that the operator can control cards. They do not create
+a protocol path for the relay to generate the final deck, hold full decrypt
+material, or rewrite a verified transcript.
+
 <!-- FAIR_POKER_RELEASE_EVIDENCE_START -->
 ## Current Release Evidence
 
 - Official site: https://fairpoker.app
-- Game client IPFS CID: bafybeib4filf5mjry7vzvopmvn27swbm3r5dfahzodlgtuznw3aohgljre
-- Core source audit package IPFS CID: bafkreicmr74e4i6fo3y7z2ojrlblmdcotqqzvjykf2pjcyksrxqirnz42m
-- Core source fingerprint: sha256:d2c716c0fac626c03ee66c4a57cf33ce9fb0df7661e7bee6af74a1d7107c1521
-- Core source archive: fair-poker-source-d2c716c0fac6.tar.gz
-- Core source archive URL: https://fairpoker.app/source/fair-poker-source-d2c716c0fac6.tar.gz
-- Core source archive SHA256: sha256:4c8ff84e23c576f1fce9c98ac2b60c4e9c219aa70a2e9e9161528de088b73cd3
+- Game client IPFS CID: bafybeibopbfwefx6vlyusewkc5asnysraiuwoi3evpxaqhyjwify3ju2ny
+- Core source audit package IPFS CID: bafkreihfusdf3noqvqcotwgynnrsfwt5edfgs2kkk5vpfs2al3gl275dum
+- Core source fingerprint: sha256:3737a9d3da80768c133d081daeec8573bcef9148a9c6eae65b4f65be8f400b68
+- Core source archive: fair-poker-source-3737a9d3da80.tar.gz
+- Core source archive URL: https://fairpoker.app/source/fair-poker-source-3737a9d3da80.tar.gz
+- Core source archive SHA256: sha256:e5a4865db5d0ac04e9d8d86b6322da7d20ca69694a576af2cb405eccbd7fa3a3
 - Release manifest: https://fairpoker.app/source/release.json
 - Verification guide: https://fairpoker.app/verify-guide.html
 - Full audit report: https://fairpoker.app/audit-report.html

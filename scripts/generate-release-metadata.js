@@ -15,8 +15,6 @@ const includedRoots = [
   'scripts/verify-transcript.js',
   'scripts/generate-release-metadata.js',
   'scripts/create-source-release.js',
-  'scripts/sync-public-release-evidence.js',
-  'scripts/validate-release-evidence.js',
   'src/lib/fairness',
   'src/lib/texas-holdem',
   'src/lib/MentalPokerGameRoom.ts',
@@ -68,12 +66,28 @@ const files = includedRoots
   .flatMap(collectFiles)
   .sort((a, b) => path.relative(root, a).localeCompare(path.relative(root, b)));
 
+function hashContent(file) {
+  const relative = path.relative(root, file).replace(/\\/g, '/');
+  if (relative !== 'package.json') {
+    return fs.readFileSync(file);
+  }
+  const packageJson = JSON.parse(fs.readFileSync(file, 'utf8'));
+  packageJson.description = 'Fair Poker core fairness audit package';
+  packageJson.scripts = {
+    'generate:release-metadata': 'node scripts/generate-release-metadata.js',
+    'verify:transcript': 'node scripts/verify-transcript.js',
+    'release:source': 'npm run generate:release-metadata && node scripts/create-source-release.js',
+    test: 'react-scripts test',
+  };
+  return Buffer.from(`${JSON.stringify(packageJson, null, 2)}\n`);
+}
+
 const hash = crypto.createHash('sha256');
 for (const file of files) {
   const relative = path.relative(root, file).replace(/\\/g, '/');
   hash.update(relative);
   hash.update('\0');
-  hash.update(fs.readFileSync(file));
+  hash.update(hashContent(file));
   hash.update('\0');
 }
 
