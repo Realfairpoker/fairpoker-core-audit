@@ -5,7 +5,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const workspaceRoot = path.resolve(root, '..');
 const defaultAuditRepo = '/tmp/fairpoker-core-audit';
-const defaultGameCid = 'bafybeihwpu3ajtggckcxmhals75ei7c3lrlblwsv7pghpktw3mpb2aryuq';
+const defaultGameCid = 'bafybeiegxcibhvlpdmq45ts7k5sohdsbsli5a77i6m4fwwrktgxq2ihil4';
 
 function parseArgs(argv) {
   const result = {};
