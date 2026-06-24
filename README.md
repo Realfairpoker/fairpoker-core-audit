@@ -278,11 +278,14 @@ English:
 4. Extract the package, regenerate `sourceFingerprint`, and compare it with the fingerprint published on the official site, audit report, and evidence file.
 
 ```bash
-curl -L -o fair-poker-source.tar.gz \
-  https://ipfs.io/ipfs/bafkreifedw6owbkma2txdy4i4nrevfhz2daqcutvuxfd4rusig7paa7kxu
+curl -L -o release.json https://fairpoker.app/source/release.json
+SOURCE_CID=$(node -e "console.log(require('./release.json').ipfsCid)")
+SOURCE_SHA=$(node -e "console.log(require('./release.json').archiveSha256.replace(/^sha256:/, ''))")
+SOURCE_FP=$(node -e "console.log(require('./release.json').sourceFingerprint)")
 
+curl -L -o fair-poker-source.tar.gz "https://ipfs.io/ipfs/${SOURCE_CID}"
 shasum -a 256 fair-poker-source.tar.gz
-# must equal a41dbceb054c06a771e388e3624a94f9d0c1015275a5ca3e469241bef003eabd
+# must equal ${SOURCE_SHA}
 
 mkdir fair-poker-source
 tar -xzf fair-poker-source.tar.gz -C fair-poker-source --strip-components=1
@@ -292,11 +295,8 @@ npm run generate:release-metadata
 grep sourceFingerprint src/generated/releaseMetadata.ts
 ```
 
-Expected source fingerprint:
-
-```text
-sha256:151ddedf04708ed04662c11976eb32ff4d4ebadc97e8ad654cf35cf24e17a47d
-```
+Expected source fingerprint: compare the generated value with `${SOURCE_FP}`
+from `release.json` or with `evidence/release.json` in this repository.
 
 If the archive SHA256 and source fingerprint match, the public core dealing,
 shuffling, encryption, decryption, signing, transcript, and verifier code have
