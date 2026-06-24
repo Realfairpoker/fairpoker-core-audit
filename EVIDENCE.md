@@ -11,9 +11,9 @@ hash-chain replay, and local verification.
 - Project: Fair Poker
 - Public domain: fairpoker.app
 - Cloudflare Pages project: fairpoker
-- Pages deployment: https://0faca6e9.fairpoker.pages.dev
+- Pages deployment: https://8cd95a1f.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
-- Game client IPFS CID: bafybeihwpu3ajtggckcxmhals75ei7c3lrlblwsv7pghpktw3mpb2aryuq
+- Game client IPFS CID: bafybeifdfidvhfomylo67vu5wq4nnjk2qbqcetmf2kijqmjyhhkoqvjuxm
 - Core source audit package IPFS CID: bafkreig3b2rwkcl6vw5ktklqnpsuqvzfd7mohkvk3p2m2y24sva7ffucdq
 - Core source fingerprint: sha256:c25e8cf71717c8b814a05d2508afdb6073c692c154d592545a95d26b885c0f9c
 - Core source archive: fair-poker-source-c25e8cf71717.tar.gz
