@@ -212,10 +212,10 @@ English:
 
 ```bash
 curl -L -o fair-poker-source.tar.gz \
-  https://ipfs.io/ipfs/bafkreif6iuq2a74abuxikybdplut4zuzlhwlmo3wj7bge5oblk5zegnmey
+  https://ipfs.io/ipfs/bafkreihbn443t5jfbkzarl4sxysgsmnyx7mf2mihhsm2eywzkb5hfccsxy
 
 shasum -a 256 fair-poker-source.tar.gz
-# must equal be4521a07f800d2e8560237ae93e669959ecb63b764fc26275c15abb9219ac26
+# must equal e16f39b9f5250ab208af92be246931b8bfd85d31073c99a262d9507a728852be
 
 mkdir fair-poker-source
 tar -xzf fair-poker-source.tar.gz -C fair-poker-source --strip-components=1
@@ -228,7 +228,7 @@ grep sourceFingerprint src/generated/releaseMetadata.ts
 Expected source fingerprint:
 
 ```text
-sha256:478fc0cd3d07081340f997243a8ebd2a614c13a3510374cca9e00a8e3462997b
+sha256:4a457fc78087257932ee94d99a33fb69abbc8fbde857fe19fcd47150ebc83d4b
 ```
 
 If the archive SHA256 and source fingerprint match, the public core dealing,

@@ -15,6 +15,7 @@ const includedRoots = [
   'scripts/verify-transcript.js',
   'scripts/generate-release-metadata.js',
   'scripts/create-source-release.js',
+  'scripts/release-all.js',
   'src/lib/fairness',
   'src/lib/texas-holdem',
   'src/lib/MentalPokerGameRoom.ts',
