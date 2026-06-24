@@ -4,7 +4,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const releaseJsonPath = path.join(root, 'release', 'source', 'release.json');
 const releaseMetadataPath = path.join(root, 'src', 'generated', 'releaseMetadata.ts');
-const defaultGameCid = 'bafybeifvshfxihrsye2ambe2wfnnln4cd4kmu4jm4jz64nyytll6hodayq';
+const defaultGameCid = '';
 
 function readJson(filePath) {
   if (!fs.existsSync(filePath)) {

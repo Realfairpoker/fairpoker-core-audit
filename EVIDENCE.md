@@ -11,13 +11,13 @@ transcripts, hash-chain replay, and local verification.
 - Project: Fair Poker
 - Public domain: fairpoker.app
 - Cloudflare Pages project: fairpoker
-- Pages deployment: https://0a0a5280.fairpoker.pages.dev
+- Pages deployment: https://22cfe3ed.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
-- Game client IPFS CID: bafybeifhjs7yszevbwm64dc3xojpjjhy4kd6fqcd5ilszpayykbxu3qg6m
-- Core source audit package IPFS CID: bafkreidmvii7hsl73kag4pu56r3oxl7sy3bggdosxtl7b6bqcy6egurdqa
-- Core source fingerprint: sha256:61db0ce78684cf9b72dfca70b60caadbd24dbd9c0e1cdee19399002029917d79
-- Core source archive: fair-poker-source-61db0ce78684.tar.gz
-- Core source archive SHA256: sha256:6caa11f3c97fda806e3e9df476ebaff2c6c2630dd2bcd7f0f830163c43522380
+- Game client IPFS CID: bafybeicx3wovb4qbcfk37nqpiperf34lvjihh6lysfhm2drutrgslnr3em
+- Core source audit package IPFS CID: bafkreihmpwwehnobtf5j5czdi2gnptiqo45cozo4bsl3tk5vwqfqift5ga
+- Core source fingerprint: sha256:c08afc8d544c8fe51dbcc99a60e519cccb261fd8d085922e75a57fa9127bb8f3
+- Core source archive: fair-poker-source-c08afc8d544c.tar.gz
+- Core source archive SHA256: sha256:ec7dac43b5c1997a9e8b23468cd7cd10773a2765dc0c97b9abb5b40b04167d30
 - Support and bug reports: support@fairpoker.app
 
 ## Public Scope
