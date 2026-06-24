@@ -25,7 +25,7 @@ compare against the canonical release files.
 ## Current Release Evidence
 
 - Official site: https://fairpoker.app
-- Game client IPFS CID: bafybeib2uonagfgn4qj6phosfph3cfjddp23urz6c2oiqsdbl463yr6zha
+- Game client IPFS CID: bafybeib4filf5mjry7vzvopmvn27swbm3r5dfahzodlgtuznw3aohgljre
 - Core source audit package IPFS CID: bafkreicmr74e4i6fo3y7z2ojrlblmdcotqqzvjykf2pjcyksrxqirnz42m
 - Core source fingerprint: sha256:d2c716c0fac626c03ee66c4a57cf33ce9fb0df7661e7bee6af74a1d7107c1521
 - Core source archive: fair-poker-source-d2c716c0fac6.tar.gz
