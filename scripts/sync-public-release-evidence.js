@@ -4,7 +4,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const releaseJsonPath = path.join(root, 'release', 'source', 'release.json');
 const releaseMetadataPath = path.join(root, 'src', 'generated', 'releaseMetadata.ts');
-const defaultGameCid = 'bafybeifdfidvhfomylo67vu5wq4nnjk2qbqcetmf2kijqmjyhhkoqvjuxm';
+const defaultGameCid = 'bafybeifvshfxihrsye2ambe2wfnnln4cd4kmu4jm4jz64nyytll6hodayq';
 
 function readJson(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -23,6 +23,25 @@ function readGeneratedSourceFingerprint() {
     throw new Error('Could not read sourceFingerprint from src/generated/releaseMetadata.ts.');
   }
   return match[1];
+}
+
+function readExistingGameCid() {
+  for (const relativePath of [
+    'public/audit-report.html',
+    'public/verify-guide.html',
+    'public/security.html',
+    'release/github-core/fair-poker-source/EVIDENCE.md',
+  ]) {
+    const filePath = path.join(root, relativePath);
+    if (!fs.existsSync(filePath)) {
+      continue;
+    }
+    const match = fs.readFileSync(filePath, 'utf8').match(/bafy[a-z0-9]{50,}/);
+    if (match) {
+      return match[0];
+    }
+  }
+  return '';
 }
 
 function replaceRequired(text, pattern, replacement, label, filePath) {
@@ -54,6 +73,17 @@ function replaceSourceUrls(text, release) {
     .replace(/https:\/\/fairpoker\.app\/source\/fair-poker-source-[a-f0-9]{12}\.tar\.gz/g, archiveUrl)
     .replace(/https:\/\/ipfs\.io\/ipfs\/bafkrei[a-z0-9]+\/?/g, ipfsGatewayUrl)
     .replace(/https:\/\/bafkrei[a-z0-9]+\.ipfs\.dweb\.link\/?/g, dwebUrl);
+}
+
+function replaceGameCid(text, gameCid) {
+  if (!gameCid) {
+    return text;
+  }
+  return text
+    .replace(/bafy[a-z0-9]+\.ipfs\.dweb\.link/g, `${gameCid}.ipfs.dweb.link`)
+    .replace(/ipfs\.io\/ipfs\/bafy[a-z0-9]+/g, `ipfs.io/ipfs/${gameCid}`)
+    .replace(/(<dt>牌局客户端 CID<\/dt>\s*<dd>)[^<]+(<\/dd>)/g, `$1${gameCid}$2`)
+    .replace(/(<dt>Game client CID<\/dt>\s*<dd>)[^<]+(<\/dd>)/g, `$1${gameCid}$2`);
 }
 
 function upsertAuditLink(text, label, href) {
@@ -94,9 +124,10 @@ function ensureVerifyGuideSourceUrlFact(text, release) {
   );
 }
 
-function updateAuditReport(release) {
+function updateAuditReport(release, gameCid) {
   const filePath = path.join(root, 'public', 'audit-report.html');
   let text = fs.readFileSync(filePath, 'utf8');
+  text = updateDefinition(text, '牌局客户端 CID', gameCid, filePath);
   text = updateDefinition(text, '核心源码包 CID', release.ipfsCid || 'not-provided-ipfs-cid', filePath);
   text = updateDefinition(text, '源码指纹', release.sourceFingerprint, filePath);
   text = updateDefinition(text, '源码压缩包 SHA256', release.archiveSha256, filePath);
@@ -107,32 +138,40 @@ function updateAuditReport(release) {
   );
   text = ensureAuditReportLinks(text, release);
   text = replaceSourceUrls(text, release);
+  text = replaceGameCid(text, gameCid);
   fs.writeFileSync(filePath, text);
 }
 
-function updateVerifyGuide(release) {
+function updateVerifyGuide(release, gameCid) {
   const filePath = path.join(root, 'public', 'verify-guide.html');
   const archiveUrl = release.archiveUrl || `https://fairpoker.app/source/${release.archiveFile}`;
   let text = fs.readFileSync(filePath, 'utf8');
+  text = updateDefinition(text, 'Game client CID', gameCid, filePath);
   text = updateDefinition(text, 'Source package CID', release.ipfsCid || 'not-provided-ipfs-cid', filePath);
   text = ensureVerifyGuideSourceUrlFact(text, release);
   text = updateDefinition(text, 'Source package URL', archiveUrl, filePath);
   text = updateDefinition(text, 'Source fingerprint', release.sourceFingerprint, filePath);
   text = updateDefinition(text, 'Archive SHA256', release.archiveSha256, filePath);
   text = replaceSourceUrls(text, release);
+  text = text
+    .replace(/# 应等于 [a-f0-9]{64}/g, `# 应等于 ${release.archiveSha256.replace('sha256:', '')}`)
+    .replace(/# must equal [a-f0-9]{64}/g, `# must equal ${release.archiveSha256.replace('sha256:', '')}`);
   text = text.replace(
     /(curl -L -o fair-poker-source\.tar\.gz \\\n  )(?:https:\/\/(?:ipfs\.io\/ipfs\/bafkrei[a-z0-9]+|fairpoker\.app\/source\/fair-poker-source-[a-f0-9]{12}\.tar\.gz)|not-provided-source-url\/fair-poker-source-[a-f0-9]{12}\.tar\.gz)/g,
     `$1${archiveUrl}`
   );
+  text = replaceGameCid(text, gameCid);
   fs.writeFileSync(filePath, text);
 }
 
-function updateSecurity(release) {
+function updateSecurity(release, gameCid) {
   const filePath = path.join(root, 'public', 'security.html');
   let text = fs.readFileSync(filePath, 'utf8');
+  text = updateDefinition(text, 'Game client CID', gameCid, filePath);
   text = updateDefinition(text, 'Source package CID', release.ipfsCid || 'not-provided-ipfs-cid', filePath);
   text = updateDefinition(text, 'Source fingerprint', release.sourceFingerprint, filePath);
   text = replaceSourceUrls(text, release);
+  text = replaceGameCid(text, gameCid);
   fs.writeFileSync(filePath, text);
 }
 
@@ -199,12 +238,21 @@ function updateAiJson(release) {
     appName: 'Fair Poker',
     officialSite: 'https://fairpoker.app/',
     contact: 'support@fairpoker.app',
-    purpose: 'Verifiable Texas Holdem platform with source-visible fairness code, signed transcripts, hash-chain replay, and local verification.',
+    purpose: 'Verifiable Texas Holdem platform with a server-not-dealer fairness model, source-visible core fairness code, IPFS/SHA256/source-fingerprint release identity, signed transcript hash-chains, and local replay verification.',
+    primaryFairnessClaim: 'The Fair Poker relay is not the dealer: player browsers co-create the encrypted deck, the relay forwards protocol messages, and accepted actions are recorded in signed hash-chain transcripts that can be replayed locally.',
+    evidenceChain: [
+      'Game client CID fixes the deployed table client by content address.',
+      'Source package CID, archive SHA256, and sourceFingerprint identify the public core fairness source package.',
+      'Core dealing, shuffling, encryption, decryption, event signing, transcript, hash-chain, and verifier code is source-visible.',
+      'The relay does not hold plaintext deck state, player private keys, or complete per-card decrypt material.',
+      'Each hand transcript can be downloaded and replayed with npm run verify:transcript -- /path/to/transcript.json.',
+      'Tampering with event order, signed payloads, pots, winners, or final transcript state should fail replay checks or produce warnings.',
+    ],
     publicAuditResources: {
       auditReport: 'https://fairpoker.app/audit-report.html',
       verificationGuide: 'https://fairpoker.app/verify-guide.html',
       securityModel: 'https://fairpoker.app/security.html',
-      independentAssurance: 'https://fairpoker.app/independent-assurance.html',
+      publicEvidenceStatus: 'https://fairpoker.app/independent-assurance.html',
       auditStatusJson: 'https://fairpoker.app/audit/status.json',
       sourceReleaseManifest: 'https://fairpoker.app/source/release.json',
       sourceLatestText: 'https://fairpoker.app/source/latest.txt',
@@ -261,7 +309,7 @@ function main() {
       `release/source/release.json is stale. Expected ${generatedSourceFingerprint}, got ${release.sourceFingerprint}. Run npm run release:source.`
     );
   }
-  const gameCid = process.env.GAME_CID || process.env.REACT_APP_GAME_IPFS_CID || defaultGameCid;
+  const gameCid = process.env.GAME_CID || process.env.REACT_APP_GAME_IPFS_CID || readExistingGameCid() || defaultGameCid;
   updateAuditReport(release, gameCid);
   updateVerifyGuide(release, gameCid);
   updateSecurity(release, gameCid);

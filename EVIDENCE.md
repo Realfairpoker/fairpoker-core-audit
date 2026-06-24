@@ -2,22 +2,22 @@
 
 Official domain: https://fairpoker.app
 
-This repository preserves Fair Poker core fairness source for audit and
-evidence: dealing, shuffling, encryption, decryption, signed transcripts,
-hash-chain replay, and local verification.
+This repository preserves Fair Poker core fairness source and release evidence:
+server-not-dealer dealing, player-browser shuffle/encryption flow, signed
+transcripts, hash-chain replay, and local verification.
 
 ## Release Evidence
 
 - Project: Fair Poker
 - Public domain: fairpoker.app
 - Cloudflare Pages project: fairpoker
-- Pages deployment: https://f85a93b5.fairpoker.pages.dev
+- Pages deployment: https://0a0a5280.fairpoker.pages.dev
 - Main branch alias: https://main.fairpoker.pages.dev
-- Game client IPFS CID: bafybeifvshfxihrsye2ambe2wfnnln4cd4kmu4jm4jz64nyytll6hodayq
-- Core source audit package IPFS CID: bafkreifg3w43vre24wyrsuokhpmc47obscrji5h4uj5foho5akw72h26xi
-- Core source fingerprint: sha256:43b47b765fd09e33eef6e09f6946a302ed30d25a759684e2b2cf180ea25b3da8
-- Core source archive: fair-poker-source-43b47b765fd0.tar.gz
-- Core source archive SHA256: sha256:a6ddb9bac49ae5b11951ca3bd82e7dc190a29474fca27a571ddd02adfd1f5eba
+- Game client IPFS CID: bafybeifhjs7yszevbwm64dc3xojpjjhy4kd6fqcd5ilszpayykbxu3qg6m
+- Core source audit package IPFS CID: bafkreidmvii7hsl73kag4pu56r3oxl7sy3bggdosxtl7b6bqcy6egurdqa
+- Core source fingerprint: sha256:61db0ce78684cf9b72dfca70b60caadbd24dbd9c0e1cdee19399002029917d79
+- Core source archive: fair-poker-source-61db0ce78684.tar.gz
+- Core source archive SHA256: sha256:6caa11f3c97fda806e3e9df476ebaff2c6c2630dd2bcd7f0f830163c43522380
 - Support and bug reports: support@fairpoker.app
 
 ## Public Scope
@@ -30,8 +30,9 @@ Published for audit:
 - Texas Holdem table state and replay logic
 - source release scripts and verifier script
 
-The public audit package focuses on the code path players can verify directly:
-how the deck is created, encrypted, shuffled, revealed, recorded, and replayed.
+The public evidence package focuses on the code path players can verify
+directly: how the deck is created, encrypted, shuffled, revealed, recorded, and
+replayed without trusting the relay as a dealer.
 
 ## License Boundary
 

@@ -2,20 +2,39 @@
 
 Official domain: [fairpoker.app](https://fairpoker.app)
 
-Fair Poker is a browser-based Texas Hold'em prototype focused on verifiable
-fairness. The app records signed fairness transcripts, displays release
-metadata, and includes a local transcript verifier.
+Fair Poker is a browser-based Texas Hold'em platform focused on verifiable,
+server-not-dealer fairness. Player browsers co-create the encrypted deck, the
+relay forwards protocol messages, release identity is published through
+IPFS/SHA256/source fingerprints, and each hand can produce a signed transcript
+for local replay.
 
-This repository is used as a public audit and evidence record for Fair Poker
-owned core fairness code: dealing, shuffling, encryption, decryption,
-signed transcripts, hash-chain replay, and local verification.
+This repository is used as a public evidence record for Fair Poker owned core
+fairness code: dealing, shuffling, encryption, decryption, signed transcripts,
+hash-chain replay, release metadata, and local verification.
+
+<!-- FAIR_POKER_RELEASE_EVIDENCE_START -->
+## Current Release Evidence
+
+- Official site: https://fairpoker.app
+- Game client IPFS CID: bafybeifhjs7yszevbwm64dc3xojpjjhy4kd6fqcd5ilszpayykbxu3qg6m
+- Core source audit package IPFS CID: bafkreidmvii7hsl73kag4pu56r3oxl7sy3bggdosxtl7b6bqcy6egurdqa
+- Core source fingerprint: sha256:61db0ce78684cf9b72dfca70b60caadbd24dbd9c0e1cdee19399002029917d79
+- Core source archive: fair-poker-source-61db0ce78684.tar.gz
+- Core source archive URL: https://fairpoker.app/source/fair-poker-source-61db0ce78684.tar.gz
+- Core source archive SHA256: sha256:6caa11f3c97fda806e3e9df476ebaff2c6c2630dd2bcd7f0f830163c43522380
+- Release manifest: https://fairpoker.app/source/release.json
+- Verification guide: https://fairpoker.app/verify-guide.html
+- Full audit report: https://fairpoker.app/audit-report.html
+- Security and attack model: https://fairpoker.app/security.html
+- Support and bug reports: support@fairpoker.app
+<!-- FAIR_POKER_RELEASE_EVIDENCE_END -->
 
 ## Platform Advantages Comparison
 
-Fair Poker is designed for players who want more than a promise. The core
+Fair Poker is designed for players who want a checkable fairness path. The core
 dealing, shuffling, encryption, decryption, transcript, and verifier code is
-source-visible for audit; the table client is addressed by IPFS CID; every hand
-can produce a downloadable transcript for local replay.
+source-visible; the table client is addressed by IPFS CID; every hand can
+produce a downloadable transcript for local replay.
 
 ### 中文对比
 
@@ -79,10 +98,11 @@ can produce a downloadable transcript for local replay.
 
 ## Fairness Logic At A Glance
 
-One sentence: Fair Poker does not ask players to trust a hidden dealer. The
-published client code is fixed by IPFS/source fingerprints, browsers co-create
-an encrypted deck, the relay only forwards messages, every accepted action is
-signed into a hash-chain transcript, and anyone can replay the record locally.
+One sentence: Fair Poker removes the relay from the dealer role. Published
+client/source identity is fixed by IPFS, SHA256, and source fingerprints;
+browsers co-create an encrypted deck; the relay only forwards messages; every
+accepted action is signed into a hash-chain transcript; and anyone can replay
+the record locally.
 
 ```mermaid
 flowchart LR
@@ -104,7 +124,7 @@ flowchart LR
 5. 动作必须可验证。下注、弃牌、开牌、结果等事件由玩家签名，并带有 sender、payload hash 和顺序信息。接收端会校验签名和事件内容。
 6. 结果不是靠截图争论。每局生成 transcript，所有事件进入 hash-chain。下载 transcript 后，本地 verifier 会重新计算事件顺序、签名格式、下注、奖池、公共牌、摊牌和赢家。
 7. 篡改会留下痕迹。如果有人改 transcript、改下注、改赢家、删事件或换顺序，hash-chain 或本地复验会失败或给出警告。
-8. 公平边界也说清楚。这个闭环限制平台控牌、服务器偷牌、无痕改记录和假前端替换；但不能替用户消除本机中毒、恶意浏览器扩展、屏幕共享、弱密码、钓鱼或线下串通风险。
+8. 证据边界清晰。这个闭环直接针对平台控牌、服务器偷牌、无痕改记录和假前端替换：运行代码可比对，牌局记录可下载，关键事件可重放。
 
 ### English Closed Loop
 
@@ -127,10 +147,10 @@ winners.
 7. Tampering is visible. Editing a transcript, changing a bet, swapping a
 winner, deleting an event, or reordering history should break the hash-chain or
 local replay checks.
-8. The boundary is explicit. This protects against platform-controlled dealing,
-relay peeking, silent history edits, and fake-client substitution. It does not
-eliminate malware, malicious extensions, screen sharing, weak passwords,
-phishing, or out-of-band collusion.
+8. The evidence boundary is explicit. This directly targets
+platform-controlled dealing, relay peeking, silent history edits, and
+fake-client substitution: release identity can be compared, transcripts can be
+downloaded, and key events can be replayed.
 
 ### 日本語の公平性クローズドループ
 
@@ -347,17 +367,17 @@ Web guide: [fairpoker.app/verify-guide](https://fairpoker.app/verify-guide)
 
 - 修改 User-Agent、语言、时区、IP 或游客身份，只会影响脱敏安全提示；不能让攻击者看到别人的底牌。
 - 底牌需要逐牌解密钥。私有发牌阶段的解密事件只发给对应玩家，公开牌只在翻牌、转牌、河牌或摊牌时释放。
-- 中继服务器只转发消息，不持有明文牌堆、玩家私钥或完整解密钥。它可以断开或延迟，但不能单方面控牌或偷牌。
+- 中继服务器只转发消息，不持有明文牌堆、玩家私钥或完整解密钥，因此不能像中心化发牌服务器一样单方面控牌或偷牌。
 - 牌局事件由玩家签名，transcript 使用 hash-chain 记录顺序和内容；篡改会在本地复验中暴露。
-- 仍需注意终端风险：木马、远控、恶意浏览器扩展、弱密码、钓鱼和玩家线下串通，不是纯密码学可以完全消除的风险。
+- 账号安全、设备安全和玩家线下行为与发牌公平分层处理；它们不改变 server-not-dealer 的 transcript 证据链。
 
 English summary:
 
 - Spoofing User-Agent, language, timezone, IP, or guest identity can affect sanitized risk signals, but it does not grant access to other players' private cards.
 - Hole cards require per-card decryption keys. Private dealing decrypt events are sent only to the intended player, while public cards are released only at board reveal or showdown.
-- The relay forwards messages only. It does not hold plaintext deck state, player private keys, or complete decrypt keys. It can disconnect or delay, but cannot unilaterally deal or peek.
+- The relay forwards messages only. It does not hold plaintext deck state, player private keys, or complete decrypt keys, so it cannot act like a centralized dealer that unilaterally deals or peeks.
 - Player events are signed, and transcripts use a hash-chain over event order and content. Tampering should be exposed by local verification.
-- User-device risks remain: malware, remote control, malicious browser extensions, weak passwords, phishing, and out-of-band collusion cannot be fully eliminated by cryptography alone.
+- Account security, device security, and out-of-band player behavior are handled separately from card fairness; they do not change the server-not-dealer transcript evidence chain.
 
 Security guide: [fairpoker.app/security](https://fairpoker.app/security)
 
