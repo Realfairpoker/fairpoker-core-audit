@@ -280,10 +280,11 @@ English:
 ```bash
 curl -L -o release.json https://fairpoker.app/source/release.json
 SOURCE_CID=$(node -e "console.log(require('./release.json').ipfsCid)")
+SOURCE_URL=$(node -e "console.log(require('./release.json').archiveUrl)")
 SOURCE_SHA=$(node -e "console.log(require('./release.json').archiveSha256.replace(/^sha256:/, ''))")
 SOURCE_FP=$(node -e "console.log(require('./release.json').sourceFingerprint)")
 
-curl -L -o fair-poker-source.tar.gz "https://ipfs.io/ipfs/${SOURCE_CID}"
+curl -L -o fair-poker-source.tar.gz "${SOURCE_URL}"
 shasum -a 256 fair-poker-source.tar.gz
 # must equal ${SOURCE_SHA}
 
