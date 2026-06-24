@@ -87,12 +87,19 @@ function toBigIntEncodedDeck(deck: StringEncodedDeck): EncodedDeck {
 
 const SESSION_INDIVIDUAL_KEYS = 'fair-poker:individualKeys';
 
-function readPersistentItem(key: string): string | null {
-  return localStorage.getItem(key) ?? sessionStorage.getItem(key);
+function clearLegacyPersistentItem(key: string) {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(key);
+  }
 }
 
-function writePersistentItem(key: string, value: string) {
-  localStorage.setItem(key, value);
+function readSessionItem(key: string): string | null {
+  clearLegacyPersistentItem(key);
+  return sessionStorage.getItem(key);
+}
+
+function writeSessionItem(key: string, value: string) {
+  clearLegacyPersistentItem(key);
   sessionStorage.setItem(key, value);
 }
 
@@ -119,15 +126,14 @@ function storeIndividualKeys(round: number, participant: string, player: Player,
     const dk = player.getIndividualKey(i).decryptionKey;
     keys[i] = { d: dk.d.toString(), n: dk.n.toString() };
   }
-  writePersistentItem(`${SESSION_INDIVIDUAL_KEYS}:${round}:${participant}`, JSON.stringify(keys));
+  writeSessionItem(`${SESSION_INDIVIDUAL_KEYS}:${round}:${participant}`, JSON.stringify(keys));
 }
 
 function loadIndividualKeys(round: number, participant: string): Map<number, DecryptionKey> {
   const result = new Map<number, DecryptionKey>();
   const storageKey = `${SESSION_INDIVIDUAL_KEYS}:${round}:${participant}`;
-  const stored = readPersistentItem(storageKey);
+  const stored = readSessionItem(storageKey);
   if (stored) {
-    writePersistentItem(storageKey, stored);
     const keys: Record<string, { d: string; n: string }> = JSON.parse(stored);
     for (const [offset, key] of Object.entries(keys)) {
       result.set(Number(offset), new DecryptionKey(BigInt(key.d), BigInt(key.n)));
@@ -318,7 +324,8 @@ export default class MentalPokerGameRoom {
       }
     }
 
-    // Fall back to stored individual keys after page refresh/replay.
+    // Fall back to tab-session individual keys after page refresh/replay.
+    // Do not persist per-card decryption material in localStorage.
     const storedKeys = roundData.individualKeys.get(participant);
     if (!storedKeys) {
       return null;

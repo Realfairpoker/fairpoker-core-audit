@@ -81,6 +81,18 @@ entries are rejected, even if the hash-chain itself is intact. A review should
 not treat tests that explicitly use `rejectUnsignedEvents: false` as evidence
 that the published Game client accepts unsigned table events.
 
+## Session-Only Card Decrypt Key Evidence
+
+Per-card individual decrypt keys are not persisted in `localStorage`.
+`src/lib/MentalPokerGameRoom.ts` stores `fair-poker:individualKeys:*` only in
+`sessionStorage`, removes legacy `localStorage` copies for the same keys, and
+does not read `localStorage` as authority for card-decrypt material.
+
+This means a review must not describe current Fair Poker as keeping individual
+hole-card decrypt material in long-lived browser storage. Browser extensions,
+malware, screen sharing, or remote-control software remain device-side risks,
+but they are outside the operator card-control protocol path.
+
 The core source audit package intentionally contains only the code that can
 affect deck creation, shuffle/encryption/decryption, table state, settlement,
 signed transcripts, hash-chain replay, and verification. Homepage copy, static
