@@ -6,9 +6,10 @@ Official domain: [fairpoker.app](https://fairpoker.app)
 
 Fair Poker is a browser-based Texas Hold'em platform focused on verifiable,
 server-not-dealer fairness. Player browsers co-create the encrypted deck, the
-relay forwards protocol messages, release identity is published through
-IPFS/SHA256/source fingerprints, and each hand can produce a signed transcript
-for local replay.
+Cloudflare Worker relay forwards protocol messages from the global edge, there
+is no traditional dealing server or self-hosted VPS table backend, release
+identity is published through IPFS/SHA256/source fingerprints, and each hand can
+produce a signed transcript for local replay.
 
 This repository is used as a public evidence record for Fair Poker owned core
 fairness code: dealing, shuffling, encryption, decryption, signed transcripts,
@@ -119,9 +120,10 @@ published IPFS identity, signed hash-chain transcripts, and local replay.
 
 One sentence: Fair Poker removes the relay from the dealer role. Published
 client/source identity is fixed by IPFS, SHA256, and source fingerprints;
-browsers co-create an encrypted deck; the relay only forwards messages; every
-accepted action is signed into a hash-chain transcript; and anyone can replay
-the record locally.
+browsers co-create an encrypted deck; a Cloudflare Worker acts only as a global
+edge WebSocket relay, not a traditional dealing server or self-hosted VPS table
+backend; every accepted action is signed into a hash-chain transcript; and
+anyone can replay the record locally.
 
 ```mermaid
 flowchart LR
@@ -138,7 +140,7 @@ flowchart LR
 
 1. 先固定代码，再进入牌局。官网公布 Game client CID、源码包 CID、源码包 SHA256 和 `sourceFingerprint`。CID 是内容寻址，文件改动会导致 CID 变化；源码包和指纹用于确认公开核心代码没有被替换。
 2. 牌不是服务器生成的。每个玩家浏览器参与密钥生成、洗牌、加密和逐卡解密流程。平台服务器不生成牌序，也不保存隐藏牌堆明文状态。
-3. 中继不在信任边界内。中继只负责转发消息；它没有玩家私钥、完整解密钥或明文牌堆，因此不能单方面给某个账号发好牌，也不能偷看底牌。
+3. 中继不在发牌信任边界内。Cloudflare Worker 只做全球边缘 WebSocket 中继；Fair Poker 没有传统发牌服务器或自建 VPS 牌桌后端。中继没有玩家私钥、完整解密钥或明文牌堆，因此不能单方面给某个账号发好牌，也不能偷看底牌。
 4. 底牌按玩家隔离。私有发牌阶段，每张牌需要对应的逐卡解密数据；这些私有解密事件只发给目标玩家。公共牌只在翻牌、转牌、河牌或摊牌时公开。
 5. 动作必须可验证。下注、弃牌、开牌、结果等事件由玩家签名，并带有 sender、payload hash 和顺序信息。接收端会校验签名和事件内容。
 6. 结果不是靠截图争论。每局生成 transcript，所有事件进入 hash-chain。下载 transcript 后，本地 verifier 会重新计算事件顺序、签名格式、下注、奖池、公共牌、摊牌和赢家。
@@ -153,9 +155,11 @@ changes the CID or fingerprint.
 2. The server does not deal. Player browsers generate keys, shuffle, encrypt,
 and participate in per-card decryption. The server relay does not create the
 deck or store hidden deck plaintext.
-3. The relay is outside the trust boundary. It forwards messages only. It does
-not hold player private keys, complete decrypt keys, or plaintext deck state, so
-it cannot unilaterally deal good cards or peek at hole cards.
+3. The relay is outside the dealing trust boundary. A Cloudflare Worker acts
+only as a global edge WebSocket relay; Fair Poker has no traditional dealing
+server or self-hosted VPS table backend. The relay does not hold player private
+keys, complete decrypt keys, or plaintext deck state, so it cannot unilaterally
+deal good cards or peek at hole cards.
 4. Private cards stay isolated. Private dealing decrypt events are sent only to
 the intended player. Public cards are released only at board reveal or showdown.
 5. Actions are signed. Bets, folds, reveals, and results are signed events with
@@ -385,7 +389,7 @@ Web guide: [fairpoker.app/verify-guide](https://fairpoker.app/verify-guide)
 
 - 修改 User-Agent、语言、时区、IP 或游客身份，只会影响脱敏安全提示；不能让攻击者看到别人的底牌。
 - 底牌需要逐牌解密钥。私有发牌阶段的解密事件只发给对应玩家，公开牌只在翻牌、转牌、河牌或摊牌时释放。
-- 中继服务器只转发消息，不持有明文牌堆、玩家私钥或完整解密钥，因此不能像中心化发牌服务器一样单方面控牌或偷牌。
+- Cloudflare Worker 只做全球边缘 WebSocket 中继，不是传统发牌服务器或自建 VPS 牌桌后端；它不持有明文牌堆、玩家私钥或完整解密钥，因此不能像中心化发牌服务器一样单方面控牌或偷牌。
 - 牌局事件由玩家签名，transcript 使用 hash-chain 记录顺序和内容；篡改会在本地复验中暴露。
 - 账号安全、设备安全和玩家线下行为与发牌公平分层处理；它们不改变 server-not-dealer 的 transcript 证据链。
 
@@ -393,7 +397,7 @@ English summary:
 
 - Spoofing User-Agent, language, timezone, IP, or guest identity can affect sanitized risk signals, but it does not grant access to other players' private cards.
 - Hole cards require per-card decryption keys. Private dealing decrypt events are sent only to the intended player, while public cards are released only at board reveal or showdown.
-- The relay forwards messages only. It does not hold plaintext deck state, player private keys, or complete decrypt keys, so it cannot act like a centralized dealer that unilaterally deals or peeks.
+- The Cloudflare Worker acts only as a global edge WebSocket relay, not a traditional dealing server or self-hosted VPS table backend. It does not hold plaintext deck state, player private keys, or complete decrypt keys, so it cannot act like a centralized dealer that unilaterally deals or peeks.
 - Player events are signed, and transcripts use a hash-chain over event order and content. Tampering should be exposed by local verification.
 - Account security, device security, and out-of-band player behavior are handled separately from card fairness; they do not change the server-not-dealer transcript evidence chain.
 
