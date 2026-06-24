@@ -15,7 +15,6 @@ const includedRoots = [
   'scripts/verify-transcript.js',
   'scripts/generate-release-metadata.js',
   'scripts/create-source-release.js',
-  'scripts/release-all.js',
   'src/lib/fairness',
   'src/lib/texas-holdem',
   'src/lib/MentalPokerGameRoom.ts',
@@ -77,6 +76,18 @@ for (const file of files) {
 }
 
 const sourceFingerprint = `sha256:${hash.digest('hex')}`;
+const releaseJsonPath = path.join(root, 'release', 'source', 'release.json');
+let previousRelease = null;
+if (fs.existsSync(releaseJsonPath)) {
+  try {
+    previousRelease = JSON.parse(fs.readFileSync(releaseJsonPath, 'utf8'));
+  } catch (_) {
+    previousRelease = null;
+  }
+}
+const matchingPreviousRelease = previousRelease?.sourceFingerprint === sourceFingerprint
+  ? previousRelease
+  : null;
 const sourceCommit = process.env.REACT_APP_SOURCE_COMMIT
   || process.env.SOURCE_COMMIT
   || 'source-fingerprint-only';
@@ -85,18 +96,23 @@ const releaseSignature = process.env.REACT_APP_RELEASE_SIGNATURE
   || 'unsigned-local-build';
 const sourceArchiveUrl = process.env.REACT_APP_SOURCE_ARCHIVE_URL
   || process.env.SOURCE_ARCHIVE_URL
+  || matchingPreviousRelease?.archiveUrl
   || 'not-provided-source-url';
 const sourceArchiveSha256 = process.env.REACT_APP_SOURCE_ARCHIVE_SHA256
   || process.env.SOURCE_ARCHIVE_SHA256
+  || matchingPreviousRelease?.archiveSha256
   || 'not-provided-source-archive';
 const sourceArchiveIpfsCid = process.env.REACT_APP_SOURCE_ARCHIVE_IPFS_CID
   || process.env.SOURCE_ARCHIVE_IPFS_CID
+  || matchingPreviousRelease?.ipfsCid
   || 'not-provided-ipfs-cid';
 const sourceArchiveIpfsUrl = process.env.REACT_APP_SOURCE_ARCHIVE_IPFS_URL
   || process.env.SOURCE_ARCHIVE_IPFS_URL
+  || matchingPreviousRelease?.ipfsGatewayUrl
   || 'not-provided-ipfs-url';
 const sourceReleaseManifestUrl = process.env.REACT_APP_SOURCE_RELEASE_MANIFEST_URL
   || process.env.SOURCE_RELEASE_MANIFEST_URL
+  || (matchingPreviousRelease ? 'https://fairpoker.app/source/release.json' : '')
   || 'not-provided-release-manifest-url';
 
 const metadata = {

@@ -17,7 +17,6 @@ const includedRoots = [
   'scripts/verify-transcript.js',
   'scripts/generate-release-metadata.js',
   'scripts/create-source-release.js',
-  'scripts/release-all.js',
   'src/lib/fairness',
   'src/lib/texas-holdem',
   'src/lib/MentalPokerGameRoom.ts',
@@ -41,6 +40,21 @@ const ignoredParts = new Set([
   'external',
   'ssh',
 ]);
+
+const forbiddenPublicPathParts = new Set([
+  '.env',
+  '.github',
+  'cloudflare-worker',
+  'signal-server',
+  'ssh',
+]);
+
+const forbiddenPublicContent = [
+  new RegExp('ssh-key-' + '\\d{4}-\\d{2}-\\d{2}\\.key'),
+  new RegExp('CLOUDFLARE_' + 'API_TOKEN'),
+  new RegExp('CF_' + 'API_TOKEN'),
+  new RegExp('BEGIN ' + '(?:OPENSSH|RSA|EC|PRIVATE) KEY'),
+];
 
 function readGeneratedFingerprint() {
   if (!fs.existsSync(releaseMetadataPath)) {
@@ -148,8 +162,39 @@ function createArchive(files, outputPath) {
   fs.writeFileSync(outputPath, gzip);
 }
 
+function assertSafePublicFiles(files) {
+  for (const file of files) {
+    const relative = path.relative(root, file).replace(/\\/g, '/');
+    const parts = relative.split('/');
+    if (parts.some((part) => forbiddenPublicPathParts.has(part) || part.startsWith('.env'))) {
+      throw new Error(`Refusing to publish forbidden path in source release: ${relative}`);
+    }
+
+    const content = fs.readFileSync(file);
+    const looksText = !content.includes(0);
+    if (!looksText) {
+      continue;
+    }
+    const text = content.toString('utf8');
+    for (const pattern of forbiddenPublicContent) {
+      if (pattern.test(text)) {
+        throw new Error(`Refusing to publish forbidden content pattern ${pattern} in ${relative}`);
+      }
+    }
+  }
+}
+
 function sha256File(filePath) {
   return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')}`;
+}
+
+function removeStaleSourceArtifacts(archiveFile) {
+  const keep = new Set([archiveFile, `${archiveFile}.sha256`]);
+  for (const name of fs.readdirSync(releaseDir)) {
+    if (/^fair-poker-source-[a-f0-9]{12}\.tar\.gz(?:\.sha256)?$/.test(name) && !keep.has(name)) {
+      fs.rmSync(path.join(releaseDir, name), {force: true});
+    }
+  }
 }
 
 function htmlEscape(value) {
@@ -210,6 +255,7 @@ function main() {
     .flatMap(collectFiles)
     .sort((a, b) => path.relative(root, a).localeCompare(path.relative(root, b)));
 
+  assertSafePublicFiles(files);
   createArchive(files, archivePath);
   const archiveSha256 = sha256File(archivePath);
   const ipfsCid = process.env.IPFS_CID || '';
@@ -238,6 +284,7 @@ function main() {
   fs.writeFileSync(path.join(releaseDir, 'release.json'), JSON.stringify(manifest, null, 2) + '\n');
   fs.writeFileSync(path.join(releaseDir, 'index.html'), createIndex(manifest));
   fs.writeFileSync(path.join(releaseDir, 'latest.txt'), `${archiveFile}\n${archiveSha256}\n${ipfsCid || 'not-provided-ipfs-cid'}\n`);
+  removeStaleSourceArtifacts(archiveFile);
 
   console.log(JSON.stringify(manifest, null, 2));
 }
