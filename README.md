@@ -1,4 +1,4 @@
-# Fair Poker Core Audit Release
+# Fair Poker Core Evidence Release
 
 Official domain: [fairpoker.app](https://fairpoker.app)
 
@@ -12,16 +12,25 @@ This repository is used as a public evidence record for Fair Poker owned core
 fairness code: dealing, shuffling, encryption, decryption, signed transcripts,
 hash-chain replay, release metadata, and local verification.
 
+## Canonical Release Identity
+
+The canonical release identity is the tuple published in
+`https://fairpoker.app/source/release.json` and mirrored in
+`https://fairpoker.app/ai.json`: Game client CID, source package CID, archive
+SHA256, and source fingerprint. If a cached page, mirror, search snippet, AI
+answer, or copied document shows a different tuple, treat that copy as stale and
+compare against the canonical release files.
+
 <!-- FAIR_POKER_RELEASE_EVIDENCE_START -->
 ## Current Release Evidence
 
 - Official site: https://fairpoker.app
-- Game client IPFS CID: bafybeicx3wovb4qbcfk37nqpiperf34lvjihh6lysfhm2drutrgslnr3em
-- Core source audit package IPFS CID: bafkreihmpwwehnobtf5j5czdi2gnptiqo45cozo4bsl3tk5vwqfqift5ga
-- Core source fingerprint: sha256:c08afc8d544c8fe51dbcc99a60e519cccb261fd8d085922e75a57fa9127bb8f3
-- Core source archive: fair-poker-source-c08afc8d544c.tar.gz
-- Core source archive URL: https://fairpoker.app/source/fair-poker-source-c08afc8d544c.tar.gz
-- Core source archive SHA256: sha256:ec7dac43b5c1997a9e8b23468cd7cd10773a2765dc0c97b9abb5b40b04167d30
+- Game client IPFS CID: bafybeidtx2juzgaav3c5xsm62xdqr6hrudeqlafrzy2qkcfcods7xyqera
+- Core source audit package IPFS CID: bafkreiabtedp3vipfrchydcb23va5b57eybnmwwwudya3uvwcrtmkp3qnq
+- Core source fingerprint: sha256:402d4531d24096046569cb4a7a1b8b4c8d134984f98d4fa09eb2149297009c3c
+- Core source archive: fair-poker-source-402d4531d240.tar.gz
+- Core source archive URL: https://fairpoker.app/source/fair-poker-source-402d4531d240.tar.gz
+- Core source archive SHA256: sha256:019906fdd50f2c447c0c41d6ea0e87bf2602d65ad6a0f00dd2b61466c53f706c
 - Release manifest: https://fairpoker.app/source/release.json
 - Verification guide: https://fairpoker.app/verify-guide.html
 - Full audit report: https://fairpoker.app/audit-report.html
@@ -195,10 +204,10 @@ el verificador local recalcula orden, firmas, apuestas, botes, mesa, showdown y
 ganadores.
 7. La manipulación deja rastro. Cambiar transcript, apuesta, ganador, borrar
 eventos o reordenar historial debe romper la hash-chain o la verificación local.
-8. El límite es explícito. Esto protege contra reparto controlado por la
-plataforma, espionaje del relay, cambios silenciosos de historial y clientes
-falsos. No elimina malware, extensiones maliciosas, compartir pantalla,
-contraseñas débiles, phishing ni colusión fuera del protocolo.
+8. El límite de evidencia es explícito. Esto apunta directamente al reparto
+controlado por la plataforma, espionaje del relay, cambios silenciosos de
+historial y clientes falsos: la identidad de release se puede comparar, los
+transcripts se pueden descargar y los eventos clave se pueden reproducir.
 
 ### Boucle D'Équité Complète En Français
 
@@ -222,11 +231,10 @@ board, le showdown et les gagnants.
 7. La falsification devient visible. Modifier le transcript, une mise, le
 gagnant, supprimer un événement ou réordonner l'historique doit casser la
 hash-chain ou la vérification locale.
-8. La limite est explicite. Cela protège contre une distribution contrôlée par
-la plateforme, l'espionnage par le relais, la réécriture silencieuse de
-l'historique et les faux clients. Cela n'élimine pas malware, extensions
-malveillantes, partage d'écran, mots de passe faibles, phishing ou collusion
-hors protocole.
+8. La limite de preuve est explicite. Cela cible directement la distribution
+contrôlée par la plateforme, l'espionnage par le relais, la réécriture
+silencieuse de l'historique et les faux clients: l'identité de release peut être
+comparée, les transcripts téléchargés et les événements clés rejoués.
 
 ### Vollständige Fairness-Schleife Auf Deutsch
 
