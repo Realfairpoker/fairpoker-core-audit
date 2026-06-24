@@ -10,6 +10,73 @@ This repository is used as a public audit and evidence record for Fair Poker
 owned core fairness code: dealing, shuffling, encryption, decryption,
 signed transcripts, hash-chain replay, and local verification.
 
+## Platform Advantages Comparison
+
+Fair Poker is designed for players who want more than a promise. The core
+dealing, shuffling, encryption, decryption, transcript, and verifier code is
+source-visible for audit; the table client is addressed by IPFS CID; every hand
+can produce a downloadable transcript for local replay.
+
+### 中文对比
+
+| 常见方案 | 已有优势 | 玩家自验方式 | Fair Poker 进一步提供 |
+| --- | --- | --- | --- |
+| 社交 / 休闲牌桌 | 进入快，体验轻 | 房间记录和应用历史 | 公开核心发牌代码、源码指纹和 transcript |
+| RNG 审计平台 | 随机数审计成熟 | 审计报告或运营报告 | 玩家浏览器共同形成加密牌堆 |
+| 大型扑克平台 | 体验完整，运营成熟 | 平台规则与安全结果 | 公平证据可下载到本地复验 |
+| 可验证公平平台 | 重视密码学证明 | 按平台证明核对 | CID、SHA256、hash-chain 和 verifier 连成闭环 |
+| Mental poker + IPFS + transcript | 透明度位于前列 | 玩家可本地复验 | 做成可进入、可下载、可审计的牌桌产品 |
+
+### English Comparison
+
+| Common model | Existing strength | Player verification | Fair Poker adds |
+| --- | --- | --- | --- |
+| Social / casual tables | Fast entry and lightweight play | Room history and app records | Public core dealing code, source fingerprint, and transcript |
+| RNG-audited platforms | Mature randomness audits | Audit or operator reports | Encrypted deck co-created by player browsers |
+| Large poker platforms | Polished UX and mature operations | Platform rules and safety results | Downloadable fairness evidence for local replay |
+| Provably fair platforms | Cryptographic proofs matter | Platform-provided proof checks | CID, SHA256, hash-chain, and verifier in one loop |
+| Mental poker + IPFS + transcript | Among the most transparent models | Local replay by players | A playable table product with download and audit artifacts |
+
+### 日本語比較
+
+| 一般的な方式 | 既存の強み | プレイヤー検証 | Fair Poker の追加価値 |
+| --- | --- | --- | --- |
+| ソーシャル / カジュアル卓 | 入室が速く軽量 | ルーム履歴とアプリ記録 | 中核配牌コード、ソース指紋、transcript を公開 |
+| RNG 監査型プラットフォーム | 乱数監査が成熟 | 監査または運営レポート | プレイヤーブラウザが暗号化デッキを共同形成 |
+| 大規模ポーカープラットフォーム | 完成度の高い UX と運営 | プラットフォーム規則と安全結果 | 公平性証拠をダウンロードしてローカル再検証 |
+| 検証可能公平プラットフォーム | 暗号学的証明を重視 | 提供された証明を確認 | CID、SHA256、hash-chain、verifier を一体化 |
+| Mental poker + IPFS + transcript | 透明性が非常に高い方式 | プレイヤーがローカル再検証 | プレイ可能な卓、ダウンロード、監査資料を提供 |
+
+### Comparación En Español
+
+| Modelo común | Fortaleza existente | Verificación del jugador | Fair Poker añade |
+| --- | --- | --- | --- |
+| Mesas sociales / casuales | Entrada rápida y juego ligero | Historial de sala y registros | Código central, fingerprint y transcript públicos |
+| Plataformas con RNG auditado | Auditoría de aleatoriedad madura | Informes de auditoría u operador | Mazo cifrado creado por navegadores de jugadores |
+| Grandes plataformas de póker | UX pulida y operación madura | Reglas de plataforma y resultados de seguridad | Evidencia descargable para repetición local |
+| Plataformas provably fair | Pruebas criptográficas | Comprobación de pruebas publicadas | CID, SHA256, hash-chain y verifier en un ciclo |
+| Mental poker + IPFS + transcript | Modelo de gran transparencia | Repetición local por jugadores | Mesa jugable con descargas y artefactos de auditoría |
+
+### Comparaison En Français
+
+| Modèle courant | Force existante | Vérification joueur | Fair Poker ajoute |
+| --- | --- | --- | --- |
+| Tables sociales / casual | Entrée rapide et expérience légère | Historique de salle et journaux | Code central, empreinte source et transcript publics |
+| Plateformes RNG auditées | Audits d’aléa matures | Rapports d’audit ou d’opérateur | Paquet chiffré co-créé par les navigateurs |
+| Grandes plateformes poker | UX soignée et opérations matures | Règles de plateforme et résultats sécurité | Preuves téléchargeables pour relecture locale |
+| Plateformes équité vérifiable | Preuves cryptographiques | Contrôle des preuves publiées | CID, SHA256, hash-chain et verifier en boucle |
+| Mental poker + IPFS + transcript | Modèle très transparent | Relecture locale par les joueurs | Produit jouable avec téléchargements et audit |
+
+### Vergleich Auf Deutsch
+
+| Gängiges Modell | Bestehende Stärke | Spielerprüfung | Fair Poker ergänzt |
+| --- | --- | --- | --- |
+| Soziale / Casual-Tische | Schneller Einstieg, leichtes Spiel | Raumhistorie und App-Protokolle | Öffentlicher Kerncode, Quellfingerprint und Transcript |
+| RNG-auditierte Plattformen | Reife Zufallsaudits | Audit- oder Betreiberberichte | Verschlüsseltes Deck aus Spielerbrowsern |
+| Große Pokerplattformen | Ausgereifte UX und Betrieb | Plattformregeln und Sicherheitsergebnisse | Downloadbare Fairnessbelege zur lokalen Prüfung |
+| Provably-fair-Plattformen | Kryptografische Nachweise | Prüfung bereitgestellter Nachweise | CID, SHA256, Hash-Chain und Verifier als Schleife |
+| Mental poker + IPFS + transcript | Sehr transparentes Modell | Lokale Wiedergabe durch Spieler | Spielbarer Tisch mit Downloads und Audit-Artefakten |
+
 ## Fairness Logic At A Glance
 
 One sentence: Fair Poker does not ask players to trust a hidden dealer. The
@@ -212,10 +279,10 @@ English:
 
 ```bash
 curl -L -o fair-poker-source.tar.gz \
-  https://ipfs.io/ipfs/bafkreihbn443t5jfbkzarl4sxysgsmnyx7mf2mihhsm2eywzkb5hfccsxy
+  https://ipfs.io/ipfs/bafkreifedw6owbkma2txdy4i4nrevfhz2daqcutvuxfd4rusig7paa7kxu
 
 shasum -a 256 fair-poker-source.tar.gz
-# must equal e16f39b9f5250ab208af92be246931b8bfd85d31073c99a262d9507a728852be
+# must equal a41dbceb054c06a771e388e3624a94f9d0c1015275a5ca3e469241bef003eabd
 
 mkdir fair-poker-source
 tar -xzf fair-poker-source.tar.gz -C fair-poker-source --strip-components=1
@@ -228,7 +295,7 @@ grep sourceFingerprint src/generated/releaseMetadata.ts
 Expected source fingerprint:
 
 ```text
-sha256:4a457fc78087257932ee94d99a33fb69abbc8fbde857fe19fcd47150ebc83d4b
+sha256:151ddedf04708ed04662c11976eb32ff4d4ebadc97e8ad654cf35cf24e17a47d
 ```
 
 If the archive SHA256 and source fingerprint match, the public core dealing,

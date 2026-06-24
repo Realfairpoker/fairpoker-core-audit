@@ -146,6 +146,10 @@ function runVpsIpfs(ipfsArgs) {
     'env', `IPFS_PATH=${vpsIpfsPath}`,
     'ipfs', ...ipfsArgs,
   ].join(' ');
+  return runSsh(remoteCommand);
+}
+
+function runSsh(remoteCommand) {
   return run('ssh', [
     '-i', vpsKey,
     '-o', 'BatchMode=yes',
@@ -154,6 +158,17 @@ function runVpsIpfs(ipfsArgs) {
     `${vpsUser}@${vpsHost}`,
     remoteCommand,
   ], {capture: true});
+}
+
+function uploadToVps(localPath, remotePath) {
+  run('scp', [
+    '-i', vpsKey,
+    '-o', 'BatchMode=yes',
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'ConnectTimeout=15',
+    localPath,
+    `${vpsUser}@${vpsHost}:${remotePath}`,
+  ]);
 }
 
 function parseDeploymentUrl(output) {
@@ -275,8 +290,15 @@ function main() {
   }
 
   if (!skipVps) {
-    log('Pin new source CID on VPS');
-    process.stdout.write(runVpsIpfs(['pin', 'add', newRelease.ipfsCid]));
+    log('Upload and pin new source archive on VPS');
+    const remoteArchive = `/tmp/${newRelease.archiveFile}`;
+    uploadToVps(path.join(root, 'release', 'source', newRelease.archiveFile), remoteArchive);
+    const vpsAddedCid = runVpsIpfs(['add', '--cid-version=1', '--raw-leaves', '-Q', remoteArchive]).trim();
+    if (vpsAddedCid !== newRelease.ipfsCid) {
+      throw new Error(`VPS IPFS CID mismatch: expected ${newRelease.ipfsCid}, got ${vpsAddedCid}`);
+    }
+    runSsh(`rm -f ${remoteArchive}`);
+    console.log(`Pinned on VPS: ${vpsAddedCid}`);
     for (const cid of staleCids) {
       log(`Unpin old source CID on VPS: ${cid}`);
       try {
