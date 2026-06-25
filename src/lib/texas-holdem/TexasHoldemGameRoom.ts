@@ -778,9 +778,6 @@ export class TexasHoldemGameRoom {
 
   private handleMembersChanged(members: string[]) {
     const activeMembers = new Set(members);
-    for (const member of Array.from(activeMembers)) {
-      this.sittingOutPlayers.delete(member);
-    }
 
     for (const [roundNo, roundData] of Array.from(this.dataByRounds.entries())) {
       const disconnectedTurn = roundData.currentTurn;
