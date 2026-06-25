@@ -104,6 +104,10 @@ function writeSessionItem(key: string, value: string) {
   sessionStorage.setItem(key, value);
 }
 
+function normalizeStorageScope(scope: string | undefined) {
+  return encodeURIComponent(scope || 'local-table');
+}
+
 function getParticipants(settings: MentalPokerRoundSettings): string[] {
   const participants: string[] = [];
   const add = (participant?: string) => {
@@ -121,18 +125,32 @@ function getParticipants(settings: MentalPokerRoundSettings): string[] {
   return participants;
 }
 
-function storeIndividualKeys(round: number, participant: string, player: Player, cards: number) {
+function individualKeysStorageKey(scope: string, round: number, participant: string) {
+  return `${SESSION_INDIVIDUAL_KEYS}:${normalizeStorageScope(scope)}:${round}:${participant}`;
+}
+
+function legacyIndividualKeysStorageKey(round: number, participant: string) {
+  return `${SESSION_INDIVIDUAL_KEYS}:${round}:${participant}`;
+}
+
+function storeIndividualKeys(scope: string, round: number, participant: string, player: Player, cards: number) {
   const keys: Record<number, { d: string; n: string }> = {};
   for (let i = 0; i < cards; i++) {
     const dk = player.getIndividualKey(i).decryptionKey;
     keys[i] = { d: dk.d.toString(), n: dk.n.toString() };
   }
-  writeSessionItem(`${SESSION_INDIVIDUAL_KEYS}:${round}:${participant}`, JSON.stringify(keys));
+  const legacyKey = legacyIndividualKeysStorageKey(round, participant);
+  clearLegacyPersistentItem(legacyKey);
+  sessionStorage.removeItem(legacyKey);
+  writeSessionItem(individualKeysStorageKey(scope, round, participant), JSON.stringify(keys));
 }
 
-function loadIndividualKeys(round: number, participant: string): Map<number, DecryptionKey> {
+function loadIndividualKeys(scope: string, round: number, participant: string): Map<number, DecryptionKey> {
   const result = new Map<number, DecryptionKey>();
-  const storageKey = `${SESSION_INDIVIDUAL_KEYS}:${round}:${participant}`;
+  const legacyKey = legacyIndividualKeysStorageKey(round, participant);
+  clearLegacyPersistentItem(legacyKey);
+  sessionStorage.removeItem(legacyKey);
+  const storageKey = individualKeysStorageKey(scope, round, participant);
   const stored = readSessionItem(storageKey);
   if (stored) {
     const keys: Record<string, { d: string; n: string }> = JSON.parse(stored);
@@ -143,24 +161,34 @@ function loadIndividualKeys(round: number, participant: string): Map<number, Dec
   return result;
 }
 
-function revealedBoardCardStorageKey(round: number) {
+function revealedBoardCardStorageKey(scope: string, round: number) {
+  return `${SESSION_REVEALED_BOARD_CARDS}:${normalizeStorageScope(scope)}:${round}`;
+}
+
+function legacyRevealedBoardCardStorageKey(round: number) {
   return `${SESSION_REVEALED_BOARD_CARDS}:${round}`;
 }
 
-function storeRevealedBoardCard(round: number, offset: number, card: StandardCard) {
+function storeRevealedBoardCard(scope: string, round: number, offset: number, card: StandardCard) {
   if (offset < 0 || offset > 4) {
     return;
   }
-  const storageKey = revealedBoardCardStorageKey(round);
+  const legacyKey = legacyRevealedBoardCardStorageKey(round);
+  clearLegacyPersistentItem(legacyKey);
+  sessionStorage.removeItem(legacyKey);
+  const storageKey = revealedBoardCardStorageKey(scope, round);
   const stored = readSessionItem(storageKey);
   const cards: Record<string, StandardCard> = stored ? JSON.parse(stored) : {};
   cards[String(offset)] = card;
   writeSessionItem(storageKey, JSON.stringify(cards));
 }
 
-function loadRevealedBoardCards(round: number): Map<number, StandardCard> {
+function loadRevealedBoardCards(scope: string, round: number): Map<number, StandardCard> {
   const result = new Map<number, StandardCard>();
-  const stored = readSessionItem(revealedBoardCardStorageKey(round));
+  const legacyKey = legacyRevealedBoardCardStorageKey(round);
+  clearLegacyPersistentItem(legacyKey);
+  sessionStorage.removeItem(legacyKey);
+  const stored = readSessionItem(revealedBoardCardStorageKey(scope, round));
   if (!stored) {
     return result;
   }
@@ -240,14 +268,16 @@ export interface GameRoomLike<T> {
 export default class MentalPokerGameRoom {
   private readonly emitter = new EventEmitter<MentalPokerGameRoomEvents>();
   private readonly gameRoom: GameRoomLike<MentalPokerEvent>;
+  private readonly storageScope: string;
   private round: number = 0;
 
   private dataByRounds: Map<number, MentalPokerRound> = new Map();
 
   private readonly lcm = new LifecycleManager();
 
-  constructor(gameRoom: GameRoomLike<MentalPokerEvent | any>) {
+  constructor(gameRoom: GameRoomLike<MentalPokerEvent | any>, storageScope?: string) {
     this.gameRoom = gameRoom;
+    this.storageScope = storageScope || 'local-table';
 
     this.propagate('status');
     this.propagate('connected');
@@ -328,7 +358,7 @@ export default class MentalPokerGameRoom {
             deck.cards[offset],
           );
           const card = decodeStandardCard(Number(fullyDecrypted));
-          storeRevealedBoardCard(round, offset, card);
+          storeRevealedBoardCard(this.storageScope, round, offset, card);
           console.log(`The card [${offset}] has been decrypted: ${card.suit} ${card.rank}`);
           this.emitter.emit('card', round, offset, card);
         });
@@ -339,7 +369,7 @@ export default class MentalPokerGameRoom {
     });
 
     this.dataByRounds.set(round, newRoundData);
-    for (const [offset, card] of Array.from(loadRevealedBoardCards(round).entries())) {
+    for (const [offset, card] of Array.from(loadRevealedBoardCards(this.storageScope, round).entries())) {
       this.emitter.emit('card', round, offset, card);
     }
     return newRoundData;
@@ -455,7 +485,7 @@ export default class MentalPokerGameRoom {
       // Load stored individual keys so showCard/dealCard can work post-replay.
       for (const participant of participants) {
         roundData.playerDeferred(participant).resolve(null);
-        roundData.individualKeys.set(participant, loadIndividualKeys(e.round, participant));
+        roundData.individualKeys.set(participant, loadIndividualKeys(this.storageScope, e.round, participant));
       }
       return;
     }
@@ -470,7 +500,7 @@ export default class MentalPokerGameRoom {
       roundData.playerDeferred(myPeerId).resolve(playerPromise);
 
       const player = await playerPromise;
-      storeIndividualKeys(e.round, myPeerId, player, CARDS);
+      storeIndividualKeys(this.storageScope, e.round, myPeerId, player, CARDS);
 
       console.debug(`Encrypting and shuffling the deck by ${myPeerId}.`);
 
@@ -509,7 +539,7 @@ export default class MentalPokerGameRoom {
     roundData.playerDeferred(participant).resolve(playerPromise);
 
     const player = await playerPromise;
-    storeIndividualKeys(round, participant, player, CARDS);
+    storeIndividualKeys(this.storageScope, round, participant, player, CARDS);
     return player;
   }
 

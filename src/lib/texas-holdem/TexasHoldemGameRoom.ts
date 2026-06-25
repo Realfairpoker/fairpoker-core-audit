@@ -101,6 +101,7 @@ export const DEFAULT_ENCRYPTION_BITS = 256;
 export const DEFAULT_PLANNED_ROUNDS = 10;
 const MIN_PLANNED_ROUNDS = 1;
 const MAX_PLANNED_ROUNDS = 100;
+const REPLAY_AUTO_FOLD_GRACE_MS = 4000;
 
 enum Stage {
   PRE_FLOP = 0,
@@ -298,6 +299,14 @@ export class TexasHoldemGameRoom {
       ...players.slice(0, sbOffset),
     ];
 
+    const deckReady = new Promise<void>(resolve => {
+      const handler = () => {
+        this.mentalPokerGameRoom.listener.off('shuffled', handler);
+        resolve();
+      };
+      this.mentalPokerGameRoom.listener.on('shuffled', handler);
+    });
+
     this.round = await this.mentalPokerGameRoom.startNewRound({
       participants: playersOrdered,
       bits: normalizedSettings.bits,
@@ -307,13 +316,7 @@ export class TexasHoldemGameRoom {
     // before firing newRound. This ensures all protocol events are committed
     // to the Raft log, so a page refresh at any point after the game UI
     // appears can be fully replayed.
-    await new Promise<void>(resolve => {
-      const handler = () => {
-        this.mentalPokerGameRoom.listener.off('shuffled', handler);
-        resolve();
-      };
-      this.mentalPokerGameRoom.listener.on('shuffled', handler);
-    });
+    await deckReady;
 
     await this.gameRoom.emitEvent({
       type: 'public',
@@ -669,8 +672,16 @@ export class TexasHoldemGameRoom {
     replay?: boolean,
   ) {
     this.clearTurnTimer(roundData);
+    const timeoutSeconds = roundData.settings?.autoFoldTimeoutSeconds;
+    const timeoutMs = timeoutSeconds ? timeoutSeconds * 1000 : 0;
+    const replayedOpponentTurn = replay && whose !== this.mentalPokerGameRoom.peerId;
+    const timerDelayMs = replayedOpponentTurn && timeoutMs
+      ? Math.min(REPLAY_AUTO_FOLD_GRACE_MS, timeoutMs)
+      : timeoutMs;
     roundData.currentTurn = whose;
-    roundData.currentTurnStartedAtMs = whose ? Date.now() : 0;
+    roundData.currentTurnStartedAtMs = whose
+      ? Date.now() - Math.max(0, timeoutMs - timerDelayMs)
+      : 0;
     this.whoseTurnByRound.set(round, whose ? {whoseTurn: whose, callAmount: actionMeta?.callAmount ?? 0} : null);
     if (actionMeta) {
       this.emitter.emit('whoseTurn', round, whose, actionMeta);
@@ -678,8 +689,7 @@ export class TexasHoldemGameRoom {
       this.emitter.emit('whoseTurn', round, whose);
     }
 
-    const timeoutSeconds = roundData.settings?.autoFoldTimeoutSeconds;
-    if (!whose || !timeoutSeconds || replay || roundData.result) {
+    if (!whose || !timeoutSeconds || roundData.result) {
       return;
     }
 
@@ -688,7 +698,7 @@ export class TexasHoldemGameRoom {
         return;
       }
       this.autoFold(round, whose).catch(e => console.error('Failed to auto-fold inactive player', e));
-    }, timeoutSeconds * 1000);
+    }, timerDelayMs);
     (timer as unknown as {unref?: () => void}).unref?.();
     roundData.currentTurnTimer = timer;
   }

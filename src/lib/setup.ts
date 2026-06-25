@@ -30,6 +30,7 @@ import {
 type AllEvents = MentalPokerEvent | ChatRoomEvent | TexasHoldemTableEvent;
 
 const MODULUS_LENGTH = 2048;
+const TABLE_ID_PARAM = 'tableId';
 
 /**
  * Derive a short, deterministic peer ID from an RSA public key JWK.
@@ -147,6 +148,25 @@ function parseOptionalBoolean(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
+function createTableId() {
+  const random = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+  return `table-${random}`;
+}
+
+function publishHostTableId(tableId: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (url.searchParams.get(TABLE_ID_PARAM) === tableId) {
+    return;
+  }
+  url.searchParams.set(TABLE_ID_PARAM, tableId);
+  window.history.replaceState(window.history.state, '', url.toString());
+}
+
 function getPeerServerOptions(iceServers?: RTCIceServer[]) {
   const peerOptions: {
     host?: string;
@@ -206,7 +226,9 @@ async function initSetup() {
     throw new Error('Fair Poker requires a registered account before joining a table.');
   }
 
-  let bootstrapPeerFromUrl = new URLSearchParams(window.location.search).get('gameRoomId') ?? undefined;
+  const params = new URLSearchParams(window.location.search);
+  let bootstrapPeerFromUrl = params.get('gameRoomId') ?? undefined;
+  const tableIdFromUrl = params.get(TABLE_ID_PARAM) ?? undefined;
   const storedIdentity = readRegisteredItem(REGISTERED_SIGNING_IDENTITY);
   if (bootstrapPeerFromUrl && storedIdentity) {
     try {
@@ -228,7 +250,11 @@ async function initSetup() {
   const peerOptions = getPeerServerOptions(iceServers);
 
   const bootstrapPeers = bootstrapPeerFromUrl ? [bootstrapPeerFromUrl] : [];
-  const roomId = bootstrapPeerFromUrl ?? peerId;
+  const tableId = tableIdFromUrl ?? (bootstrapPeerFromUrl ? bootstrapPeerFromUrl : createTableId());
+  if (!bootstrapPeerFromUrl && !tableIdFromUrl) {
+    publishHostTableId(tableId);
+  }
+  const roomId = tableId;
 
   const signalingUrl = getSignalingUrl();
   const transport = signalingUrl
@@ -262,7 +288,7 @@ async function initSetup() {
 
   const texasHoldem = new TexasHoldemGameRoom(
     gameRoom,
-    new MentalPokerGameRoom(gameRoom),
+    new MentalPokerGameRoom(gameRoom, roomId),
   );
 
   const chat = new ChatRoom(gameRoom);
@@ -276,6 +302,7 @@ async function initSetup() {
 
   return {
     HostId: gameRoom.hostId,
+    TableId: tableId,
     TexasHoldem: texasHoldem,
     Chat: chat,
   };
@@ -283,6 +310,7 @@ async function initSetup() {
 
 let setupPromise: Promise<{
   HostId: string | undefined;
+  TableId: string;
   TexasHoldem: TexasHoldemGameRoom;
   Chat: ChatRoom;
 }> | undefined;
@@ -291,16 +319,18 @@ let setupPromise: Promise<{
 // These are set once setupReady resolves. Consumers that render after
 // setupReady (gated in index.tsx) can use them directly.
 export let HostId: string | undefined;
+export let TableId = '';
 export let TexasHoldem: TexasHoldemGameRoom;
 export let Chat: ChatRoom;
 
 export function ensureSetupReady() {
   if (!setupPromise) {
-    setupPromise = initSetup().then(({ HostId: h, TexasHoldem: t, Chat: c }) => {
+    setupPromise = initSetup().then(({ HostId: h, TableId: table, TexasHoldem: t, Chat: c }) => {
       HostId = h;
+      TableId = table;
       TexasHoldem = t;
       Chat = c;
-      return { HostId, TexasHoldem, Chat };
+      return { HostId, TableId, TexasHoldem, Chat };
     });
   }
   return setupPromise;
@@ -309,11 +339,13 @@ export function ensureSetupReady() {
 export const setupReady = {
   then<TResult1 = {
     HostId: string | undefined;
+    TableId: string;
     TexasHoldem: TexasHoldemGameRoom;
     Chat: ChatRoom;
   }, TResult2 = never>(
     onfulfilled?: ((value: {
       HostId: string | undefined;
+      TableId: string;
       TexasHoldem: TexasHoldemGameRoom;
       Chat: ChatRoom;
     }) => TResult1 | PromiseLike<TResult1>) | null,
@@ -323,6 +355,7 @@ export const setupReady = {
   },
 } as PromiseLike<{
   HostId: string | undefined;
+  TableId: string;
   TexasHoldem: TexasHoldemGameRoom;
   Chat: ChatRoom;
 }>;

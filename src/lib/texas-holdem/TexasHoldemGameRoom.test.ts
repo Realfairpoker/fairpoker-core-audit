@@ -201,6 +201,49 @@ describe('TexasHoldemGameRoom', () => {
     }
   });
 
+  test('replayed current turn restarts auto-fold after reconnect', async () => {
+    jest.useFakeTimers();
+    try {
+      const mockGameRoom = new MockGameRoom();
+      mockGameRoom.peerIdDeferred.resolve('A');
+      const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+      mockMentalPokerGameRoom.members = ['A', 'B'];
+      const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+      mockGameRoom.listener.emit('event', {
+        type: 'public',
+        sender: 'A',
+        data: {
+          type: 'newRound',
+          round: 1,
+          players: ['A', 'B'],
+          settings: {
+            initialFundAmount: 100,
+            autoFoldTimeoutSeconds: 5,
+          },
+        },
+      }, 'A', true);
+
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+      expect(jest.getTimerCount()).toBe(1);
+
+      jest.advanceTimersByTime(5000);
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+
+      expect(mockGameRoom.lastEventEmitted.data).toEqual({
+        type: 'action/autoFold',
+        round: 1,
+        target: 'A',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('auto-folded player sits out of the next round', async () => {
     const mockGameRoom = new MockGameRoom();
     mockGameRoom.peerIdDeferred.resolve('A');
