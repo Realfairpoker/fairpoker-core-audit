@@ -15,6 +15,7 @@
   },
   "scripts": {
     "generate:release-metadata": "node scripts/generate-release-metadata.js",
+    "build:ipfs-game": "node scripts/create-ipfs-game-build.js",
     "verify:transcript": "node scripts/verify-transcript.js",
     "release:source": "npm run generate:release-metadata && node scripts/create-source-release.js",
     "test": "react-scripts test"

@@ -15,6 +15,7 @@ const includedRoots = [
   'scripts/verify-transcript.js',
   'scripts/generate-release-metadata.js',
   'scripts/create-source-release.js',
+  'scripts/create-ipfs-game-build.js',
   'src/lib/fairness',
   'src/lib/texas-holdem',
   'src/lib/MentalPokerGameRoom.ts',
@@ -75,6 +76,7 @@ function hashContent(file) {
   packageJson.description = 'Fair Poker core fairness audit package';
   packageJson.scripts = {
     'generate:release-metadata': 'node scripts/generate-release-metadata.js',
+    'build:ipfs-game': 'node scripts/create-ipfs-game-build.js',
     'verify:transcript': 'node scripts/verify-transcript.js',
     'release:source': 'npm run generate:release-metadata && node scripts/create-source-release.js',
     test: 'react-scripts test',
