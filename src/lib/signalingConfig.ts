@@ -16,6 +16,9 @@ function localDevelopmentSignalUrl(): string | undefined {
 }
 
 export function getSignalingUrl(): string | undefined {
+  if (cleanOptionalEnv(process.env.REACT_APP_DISABLE_SIGNALING)?.toLowerCase() === 'true') {
+    return undefined;
+  }
   return cleanOptionalEnv(process.env.REACT_APP_SIGNALING_URL)
     ?? cleanOptionalEnv(process.env.REACT_APP_RELAY_WS_URL)
     ?? cleanOptionalEnv(process.env.REACT_APP_CLOUDFLARE_SIGNAL_URL)
