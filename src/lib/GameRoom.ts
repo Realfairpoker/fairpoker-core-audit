@@ -246,7 +246,14 @@ export default class GameRoom<T> {
   private shouldApplyLocalFallback(data: WireGameEvent<T>) {
     const payload = isSignedGameEvent<T>(data) ? data.payload : data;
     const type = (payload as { type?: unknown })?.type;
-    return typeof type === 'string' && type.startsWith('action/');
+    return typeof type === 'string' && (
+      type.startsWith('action/')
+      || type === 'start'
+      || type === 'deck/shuffle'
+      || type === 'deck/lock'
+      || type === 'deck/finalized'
+      || type === 'newRound'
+    );
   }
 
   private resolveLocalCommit(eventId: string) {
