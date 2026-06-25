@@ -22,14 +22,21 @@ export function evaluateStandardCards(cards: StandardCard[]) {
   return evaluateCards(cards.map(card => card.rank + card.suit.charAt(0).toLowerCase()));
 }
 
-const FIVE_COMBINATION_OF_SEVEN_CARDS = combination([0, 1, 2, 3, 4, 5, 6], 5);
-
 export function calculateEffectiveCardOffsets(
   boardAndHole: StandardCard[],
   strength: number,
   evaluate: (cards: StandardCard[]) => number = evaluateStandardCards,
 ): number[] | null {
-  for (let fiveCardOffsets of FIVE_COMBINATION_OF_SEVEN_CARDS) {
+  if (boardAndHole.length < 5 || boardAndHole.length > 7) {
+    return null;
+  }
+
+  const fiveCardOffsetCandidates = combination(
+    boardAndHole.map((_, offset) => offset),
+    5,
+  );
+
+  for (let fiveCardOffsets of fiveCardOffsetCandidates) {
     const fiveCards = boardAndHole.filter((_, i) => fiveCardOffsets.includes(i));
     const eachStrength = evaluate(fiveCards);
     if (eachStrength === strength) {
