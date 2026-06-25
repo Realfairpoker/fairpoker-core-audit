@@ -1,5 +1,5 @@
 import useEventLogs, {EventLog} from "./useEventLogs";
-import {renderHook, waitFor} from "@testing-library/react";
+import {act, renderHook, waitFor} from "@testing-library/react";
 import EventEmitter from "eventemitter3";
 import {TexasHoldemGameRoomEvents} from "./TexasHoldemGameRoom";
 
@@ -14,7 +14,9 @@ describe('useEventLogs', () => {
       const listener = new EventEmitter<TexasHoldemGameRoomEvents>();
       const { result } = renderHook(() => useEventLogs(listener));
 
-      emitEventFn(listener);
+      act(() => {
+        emitEventFn(listener);
+      });
 
       await waitFor(() => {
         expect(result.current.length).toBe(1);

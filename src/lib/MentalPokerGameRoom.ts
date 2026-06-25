@@ -340,9 +340,7 @@ export default class MentalPokerGameRoom {
 
     this.dataByRounds.set(round, newRoundData);
     for (const [offset, card] of Array.from(loadRevealedBoardCards(round).entries())) {
-      setTimeout(() => {
-        this.emitter.emit('card', round, offset, card);
-      }, 0);
+      this.emitter.emit('card', round, offset, card);
     }
     return newRoundData;
   }

@@ -1,4 +1,5 @@
 import EventEmitter from "eventemitter3";
+import {canonicalJson} from "./fairness/canonicalJson";
 import Deferred from "./Deferred";
 import {EventListener} from "./types";
 import {
@@ -7,6 +8,7 @@ import {
   SignedGameEvent,
   verifySignedGameEvent,
 } from "./fairness/eventSigning";
+import {sha256Hex} from "./fairness/hash";
 import {
   TranscriptEntry,
   TranscriptRecorder,
@@ -52,6 +54,8 @@ export type GameRoomOptions = {
    * Tests or legacy local simulations must opt out explicitly.
    */
   rejectUnsignedEvents?: boolean;
+  localCommitTimeoutMs?: number;
+  localCommitAttempts?: number;
 }
 
 /**
@@ -62,6 +66,7 @@ export interface MeshLike<T> {
   readonly peerId: string | undefined;
   readonly peers: string[];
   readonly leaderId: string | null;
+  connect?(peerId: string): void;
   sendPublic(data: T): Promise<boolean>;
   sendPrivate(recipientPeerId: string, data: T): Promise<boolean>;
   on(event: 'ready', listener: (localPeerId: string) => void): void;
@@ -78,7 +83,11 @@ export default class GameRoom<T> {
   private readonly mesh: MeshLike<WireGameEvent<T>>;
   private readonly eventSigner?: EventSigner;
   private readonly rejectUnsignedEvents: boolean;
+  private readonly localCommitTimeoutMs: number;
+  private readonly localCommitAttempts: number;
   private readonly transcript = new TranscriptRecorder<T>();
+  private readonly seenWireEvents = new Set<string>();
+  private readonly pendingLocalCommits = new Map<string, Array<() => void>>();
 
   private _status: GameRoomStatus = 'NotReady';
 
@@ -93,6 +102,8 @@ export default class GameRoom<T> {
     this.mesh = mesh as MeshLike<WireGameEvent<T>>;
     this.eventSigner = options?.eventSigner;
     this.rejectUnsignedEvents = options?.rejectUnsignedEvents ?? true;
+    this.localCommitTimeoutMs = options?.localCommitTimeoutMs ?? 5000;
+    this.localCommitAttempts = options?.localCommitAttempts ?? 45;
 
     this.mesh.on('ready', (peerId: string) => {
       console.debug(`Connected to the signaling service. (peerId = ${peerId}).`);
@@ -142,9 +153,18 @@ export default class GameRoom<T> {
     msg: { type: 'public'; sender: string; data: WireGameEvent<T> } | { type: 'private'; sender: string; recipient: string; data: WireGameEvent<T> },
     replay: boolean,
   ) {
+    const eventId = await this.getWireEventId(msg);
+    if (this.seenWireEvents.has(eventId)) {
+      return;
+    }
     const decoded = await this.decodeWireEvent(msg.data, msg.sender);
     if (!decoded) {
       return;
+    }
+    this.seenWireEvents.add(eventId);
+
+    if (replay && decoded.sender !== this.peerId) {
+      this.mesh.connect?.(decoded.sender);
     }
 
     const transcriptEntry = await this.transcript.append({
@@ -166,6 +186,8 @@ export default class GameRoom<T> {
       this.emitter.emit('event', gameEvent, decoded.sender, replay);
     } catch (e) {
       console.error(`[GameRoom] ERROR in event handler for ${(decoded.payload as any)?.type}:`, e);
+    } finally {
+      this.resolveLocalCommit(eventId);
     }
   }
 
@@ -196,6 +218,73 @@ export default class GameRoom<T> {
     };
   }
 
+  private async getWireEventId(
+    msg: { type: 'public'; sender: string; data: WireGameEvent<T> } | { type: 'private'; sender: string; recipient: string; data: WireGameEvent<T> },
+  ) {
+    if (isSignedGameEvent<T>(msg.data)) {
+      return [
+        msg.type,
+        msg.sender,
+        msg.type === 'private' ? msg.recipient : '',
+        msg.data.sender,
+        msg.data.scope,
+        msg.data.recipient ?? '',
+        msg.data.sequence,
+        msg.data.signature,
+      ].join(':');
+    }
+
+    return [
+      msg.type,
+      msg.sender,
+      msg.type === 'private' ? msg.recipient : '',
+      'unsigned',
+      await sha256Hex(canonicalJson(msg.data)),
+    ].join(':');
+  }
+
+  private shouldApplyLocalFallback(data: WireGameEvent<T>) {
+    const payload = isSignedGameEvent<T>(data) ? data.payload : data;
+    const type = (payload as { type?: unknown })?.type;
+    return typeof type === 'string' && type.startsWith('action/');
+  }
+
+  private resolveLocalCommit(eventId: string) {
+    const waiters = this.pendingLocalCommits.get(eventId);
+    if (!waiters) {
+      return;
+    }
+    this.pendingLocalCommits.delete(eventId);
+    waiters.forEach(resolve => resolve());
+  }
+
+  private waitForLocalCommit(eventId: string, timeoutMs = this.localCommitTimeoutMs): Promise<boolean> {
+    if (this.seenWireEvents.has(eventId)) {
+      return Promise.resolve(true);
+    }
+    return new Promise(resolve => {
+      const done = (committed: boolean) => {
+        clearTimeout(timer);
+        const waiters = this.pendingLocalCommits.get(eventId);
+        if (waiters) {
+          const remaining = waiters.filter(waiter => waiter !== onCommit);
+          if (remaining.length > 0) {
+            this.pendingLocalCommits.set(eventId, remaining);
+          } else {
+            this.pendingLocalCommits.delete(eventId);
+          }
+        }
+        resolve(committed);
+      };
+      const onCommit = () => done(true);
+      const timer = setTimeout(() => done(false), timeoutMs);
+      (timer as unknown as {unref?: () => void}).unref?.();
+      const waiters = this.pendingLocalCommits.get(eventId) ?? [];
+      waiters.push(onCommit);
+      this.pendingLocalCommits.set(eventId, waiters);
+    });
+  }
+
   close() {
     this._status = 'Closed';
     this.emitter.emit('status', this._status);
@@ -214,18 +303,27 @@ export default class GameRoom<T> {
    * Waits for the Raft leader to be elected before sending.
    * This ensures messages are not silently dropped during leader election.
    */
-  private async waitForLeader(): Promise<void> {
-    if (this.mesh.leaderId) return;
+  private async waitForLeader(timeoutMs = 1000): Promise<boolean> {
+    if (this.mesh.leaderId) return true;
     if (this.leaderDeferred) {
-      await this.leaderDeferred.promise;
+      await Promise.race([
+        this.leaderDeferred.promise,
+        new Promise(resolve => setTimeout(resolve, timeoutMs)),
+      ]);
     }
+    return Boolean(this.mesh.leaderId);
   }
 
   private async sendWithRetry(send: () => Promise<boolean>, label: string): Promise<void> {
-    const MAX_RETRIES = 50;
+    const MAX_RETRIES = 225;
     const RETRY_DELAY_MS = 200;
     for (let i = 0; i < MAX_RETRIES; i++) {
-      await this.waitForLeader();
+      const hasLeader = await this.waitForLeader(RETRY_DELAY_MS);
+      if (!hasLeader) {
+        if (i === 0 || i % 10 === 0) {
+          console.debug(`emitEvent (${label}): leader unavailable, trying transport anyway (attempt ${i + 1}/${MAX_RETRIES}), peers=${this.mesh.peers.join(',')}`);
+        }
+      }
       console.debug(`sendWithRetry (${label}): calling send (attempt ${i + 1}/${MAX_RETRIES})...`);
       const result = await send();
       console.debug(`sendWithRetry (${label}): send returned ${result}`);
@@ -235,14 +333,31 @@ export default class GameRoom<T> {
       }
       await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
     }
-    console.warn(`emitEvent (${label}): max retries exceeded, message may be lost.`);
+    throw new Error(`Unable to send ${label} event after reconnect retries.`);
   }
 
   async emitEvent(e: GameEvent<T>) {
+    const wireEvent = await this.encodeWireEvent(e);
+    const transportSender = await this.peerIdAsync;
     if (e.type === 'public') {
-      await this.sendWithRetry(async () => this.mesh.sendPublic(await this.encodeWireEvent(e)), 'public');
+      const shouldAwaitLocalActionCommit = this.shouldApplyLocalFallback(wireEvent);
+      const localCommitId = shouldAwaitLocalActionCommit
+        ? await this.getWireEventId({ type: 'public', sender: transportSender, data: wireEvent })
+        : null;
+      if (!shouldAwaitLocalActionCommit || !localCommitId) {
+        await this.sendWithRetry(async () => this.mesh.sendPublic(wireEvent), 'public');
+        return;
+      }
+      for (let i = 0; i < this.localCommitAttempts; i += 1) {
+        await this.sendWithRetry(async () => this.mesh.sendPublic(wireEvent), 'public');
+        if (await this.waitForLocalCommit(localCommitId)) {
+          return;
+        }
+        console.debug(`emitEvent (public action): local commit not observed; retrying signed event (${i + 1}/${this.localCommitAttempts})`);
+      }
+      throw new Error('Unable to confirm local commit for public action event after reconnect retries.');
     } else {
-      await this.sendWithRetry(async () => this.mesh.sendPrivate(e.recipient, await this.encodeWireEvent(e)), `private→${e.recipient}`);
+      await this.sendWithRetry(async () => this.mesh.sendPrivate(e.recipient, wireEvent), `private→${e.recipient}`);
     }
   }
 

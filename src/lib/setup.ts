@@ -97,6 +97,10 @@ async function getOrCreateSigningIdentity(): Promise<SigningIdentity> {
  * long-lived TURN credentials should eventually be issued by a backend.
  */
 async function fetchMeteredIceServers(): Promise<RTCIceServer[] | undefined> {
+  if (getOptionalBuildEnv(process.env.REACT_APP_PEERJS_EMPTY_ICE)?.toLowerCase() === 'true') {
+    return [];
+  }
+
   const endpoint = process.env.REACT_APP_ICE_SERVERS_ENDPOINT;
   if (!endpoint) {
     return undefined;
@@ -244,6 +248,11 @@ async function initSetup() {
     cryptoKeyBundle: bundle,
     raftLog: new LocalStorageRaftLog(`fair-poker:${roomId}:${peerId}`),
   });
+  (mesh as DandelionMesh<WireGameEvent<AllEvents>> & { connect: (remotePeerId: string) => void }).connect = (remotePeerId) => {
+    if (remotePeerId !== peerId) {
+      transport.connect(remotePeerId);
+    }
+  };
 
   const gameRoom = new GameRoom<AllEvents>(mesh, {
     hostId: bootstrapPeerFromUrl,
