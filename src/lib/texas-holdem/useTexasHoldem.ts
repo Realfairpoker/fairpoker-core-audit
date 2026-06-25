@@ -510,7 +510,7 @@ export default function useTexasHoldem() {
 
   const startNewRound = useCallback(async (settings?: Partial<TexasHoldemRoundSettings>) => {
     await TexasHoldem.startNewRound({
-      bits: DEFAULT_ENCRYPTION_BITS,
+      bits: settings?.bits ?? DEFAULT_ENCRYPTION_BITS,
       initialFundAmount: settings?.initialFundAmount ?? 100,
       smallBlindAmount: settings?.smallBlindAmount ?? DEFAULT_SMALL_BLIND_AMOUNT,
       bigBlindAmount: settings?.bigBlindAmount ?? DEFAULT_BIG_BLIND_AMOUNT,

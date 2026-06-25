@@ -97,7 +97,7 @@ export const DEFAULT_BIG_BLIND_AMOUNT = 2;
 export const DEFAULT_AUTO_FOLD_TIMEOUT_SECONDS = 60;
 const MIN_AUTO_FOLD_TIMEOUT_SECONDS = 5;
 const MAX_AUTO_FOLD_TIMEOUT_SECONDS = 300;
-export const DEFAULT_ENCRYPTION_BITS = 256;
+export const DEFAULT_ENCRYPTION_BITS = 128;
 export const DEFAULT_PLANNED_ROUNDS = 10;
 const MIN_PLANNED_ROUNDS = 1;
 const MAX_PLANNED_ROUNDS = 100;
@@ -180,7 +180,7 @@ function normalizeRoundSettings(settings: TexasHoldemRoundSettings, fallbackSeri
     normalizeBlindAmount(settings.bigBlindAmount, DEFAULT_BIG_BLIND_AMOUNT),
   );
   return {
-    bits: DEFAULT_ENCRYPTION_BITS,
+    bits: settings.bits ?? DEFAULT_ENCRYPTION_BITS,
     initialFundAmount: settings.initialFundAmount,
     smallBlindAmount,
     bigBlindAmount,
@@ -249,6 +249,10 @@ export class TexasHoldemGameRoom {
     this.propagate('status');
     this.propagate('members');
     this.propagate('shuffled');
+
+    mentalPokerGameRoom.listener.on('members', this.lcm.register((members) => {
+      this.handleMembersChanged(members);
+    }, listener => mentalPokerGameRoom.listener.off('members', listener)));
 
     this.gameRoom.listener.on('transcript', this.lcm.register((entry) => {
       this.emitter.emit('transcript', entry);
@@ -331,6 +335,7 @@ export class TexasHoldemGameRoom {
   }
 
   async bet(round: number, amount: number) {
+    await this.clearLocalTurnTimerForSubmittedAction(round);
     await this.gameRoom.emitEvent({
       type: 'public',
       sender: await this.gameRoom.peerIdAsync,
@@ -343,6 +348,7 @@ export class TexasHoldemGameRoom {
   }
 
   async fold(round: number) {
+    await this.clearLocalTurnTimerForSubmittedAction(round);
     await this.gameRoom.emitEvent({
       type: 'public',
       sender: await this.gameRoom.peerIdAsync,
@@ -657,10 +663,42 @@ export class TexasHoldemGameRoom {
     await this.handleFold(e.round, e.target, replay);
   }
 
+  private handleMembersChanged(members: string[]) {
+    const activeMembers = new Set(members);
+    for (const member of Array.from(activeMembers)) {
+      this.sittingOutPlayers.delete(member);
+    }
+
+    for (const [roundNo, roundData] of Array.from(this.dataByRounds.entries())) {
+      const disconnectedTurn = roundData.currentTurn;
+      if (
+        roundData.result
+        || !disconnectedTurn
+        || activeMembers.has(disconnectedTurn)
+        || roundData.foldPlayers.has(disconnectedTurn)
+        || roundData.allInPlayers.has(disconnectedTurn)
+      ) {
+        continue;
+      }
+      this.autoFold(roundNo, disconnectedTurn).catch(e => console.error('Failed to auto-fold disconnected player', e));
+    }
+  }
+
   private clearTurnTimer(roundData: TexasHoldemRound) {
     if (roundData.currentTurnTimer) {
       clearTimeout(roundData.currentTurnTimer);
       roundData.currentTurnTimer = undefined;
+    }
+  }
+
+  private async clearLocalTurnTimerForSubmittedAction(round: number) {
+    const roundData = this.dataByRounds.get(round);
+    if (!roundData) {
+      return;
+    }
+    const myPeerId = await this.gameRoom.peerIdAsync;
+    if (roundData.currentTurn === myPeerId) {
+      this.clearTurnTimer(roundData);
     }
   }
 
@@ -708,6 +746,9 @@ export class TexasHoldemGameRoom {
       return false;
     }
     if (replay) {
+      return true;
+    }
+    if (!this.mentalPokerGameRoom.members.includes(target)) {
       return true;
     }
     const timeoutSeconds = roundData.settings?.autoFoldTimeoutSeconds;

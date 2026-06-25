@@ -7,6 +7,7 @@ import {
   resetRegisteredIdentity,
 } from "./registeredIdentity";
 import {getOptionalBuildEnv, getSignalingUrl} from "./signalingConfig";
+import {LanguageCode, TranslationKey, languages, translateKey} from "./i18n";
 
 const AUTH_SESSION_KEY = 'fairpoker:authSession';
 export const AUTH_SESSION_CHANGED_EVENT = 'fairpoker:auth-session-changed';
@@ -15,10 +16,10 @@ const VAULT_KDF_ITERATIONS = 120000;
 const MODULUS_LENGTH = 2048;
 
 export interface AuthSession {
-  kind: 'registered' | 'guest';
+  kind: 'registered';
   userId: string;
   username: string;
-  token?: string;
+  token: string;
   expiresAt: number;
 }
 
@@ -35,20 +36,33 @@ function cleanUsername(username: string) {
   return username.trim();
 }
 
+function activeLanguage(): LanguageCode {
+  try {
+    const base = localStorage.getItem('fairpoker:language')?.split('-')[0];
+    return languages.some(language => language.code === base) ? base as LanguageCode : 'zh';
+  } catch {
+    return 'zh';
+  }
+}
+
+function authText(key: TranslationKey) {
+  return translateKey(activeLanguage(), key);
+}
+
 export function validateUsername(username: string) {
   const clean = cleanUsername(username);
   if (!/^[a-zA-Z0-9_\u4e00-\u9fa5-]{3,24}$/.test(clean)) {
-    return '用户名需 3-24 位，可用中文、字母、数字、_ 或 - / Username 3-24 chars.';
+    return authText('usernameInvalid');
   }
   return '';
 }
 
 export function validatePassword(password: string) {
   if (password.length < 8) {
-    return '密码至少 8 位 / Password needs at least 8 chars.';
+    return authText('passwordMin');
   }
   if (password.length > 128) {
-    return '密码不能超过 128 位 / Password max 128 chars.';
+    return authText('passwordMax');
   }
   return '';
 }
@@ -86,7 +100,13 @@ export function getActiveAuthSession(): AuthSession | null {
   }
   try {
     const session = JSON.parse(stored) as AuthSession;
-    if (!session.kind || !session.userId || !session.username || session.expiresAt <= Date.now()) {
+    if (
+      session.kind !== 'registered'
+      || !session.userId
+      || !session.username
+      || !session.token
+      || session.expiresAt <= Date.now()
+    ) {
       localStorage.removeItem(AUTH_SESSION_KEY);
       return null;
     }
@@ -111,18 +131,6 @@ export function clearAuthSession() {
   localStorage.removeItem(AUTH_SESSION_KEY);
   resetRegisteredIdentity();
   window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
-}
-
-export function continueAsGuest(): AuthSession {
-  const session: AuthSession = {
-    kind: 'guest',
-    userId: localStorage.getItem('fairpoker:guestId') || crypto.randomUUID(),
-    username: '游客',
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
-  };
-  localStorage.setItem('fairpoker:guestId', session.userId);
-  saveAuthSession(session);
-  return session;
 }
 
 async function createRegisteredVault(): Promise<RegisteredIdentityVault> {
@@ -190,7 +198,7 @@ export async function encryptVault(vault: RegisteredIdentityVault, password: str
 
 export async function decryptVault(encrypted: EncryptedAuthVault, password: string): Promise<RegisteredIdentityVault> {
   if (encrypted.version !== AUTH_VAULT_VERSION || encrypted.kdf !== 'PBKDF2-SHA256') {
-    throw new Error('不支持的账号密钥版本 / Unsupported account vault version.');
+    throw new Error(authText('accountVaultUnsupported'));
   }
   const key = await deriveVaultKey(password, encrypted.salt, encrypted.iterations);
   const plaintext = await crypto.subtle.decrypt(
