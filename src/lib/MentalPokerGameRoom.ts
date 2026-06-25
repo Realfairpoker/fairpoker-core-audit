@@ -86,6 +86,7 @@ function toBigIntEncodedDeck(deck: StringEncodedDeck): EncodedDeck {
 }
 
 const SESSION_INDIVIDUAL_KEYS = 'fair-poker:individualKeys';
+const SESSION_REVEALED_BOARD_CARDS = 'fair-poker:revealedBoardCards';
 
 function clearLegacyPersistentItem(key: string) {
   if (typeof localStorage !== 'undefined') {
@@ -137,6 +138,36 @@ function loadIndividualKeys(round: number, participant: string): Map<number, Dec
     const keys: Record<string, { d: string; n: string }> = JSON.parse(stored);
     for (const [offset, key] of Object.entries(keys)) {
       result.set(Number(offset), new DecryptionKey(BigInt(key.d), BigInt(key.n)));
+    }
+  }
+  return result;
+}
+
+function revealedBoardCardStorageKey(round: number) {
+  return `${SESSION_REVEALED_BOARD_CARDS}:${round}`;
+}
+
+function storeRevealedBoardCard(round: number, offset: number, card: StandardCard) {
+  if (offset < 0 || offset > 4) {
+    return;
+  }
+  const storageKey = revealedBoardCardStorageKey(round);
+  const stored = readSessionItem(storageKey);
+  const cards: Record<string, StandardCard> = stored ? JSON.parse(stored) : {};
+  cards[String(offset)] = card;
+  writeSessionItem(storageKey, JSON.stringify(cards));
+}
+
+function loadRevealedBoardCards(round: number): Map<number, StandardCard> {
+  const result = new Map<number, StandardCard>();
+  const stored = readSessionItem(revealedBoardCardStorageKey(round));
+  if (!stored) {
+    return result;
+  }
+  const cards: Record<string, StandardCard> = JSON.parse(stored);
+  for (const [offset, card] of Object.entries(cards)) {
+    if (card && offset && Number(offset) >= 0 && Number(offset) <= 4) {
+      result.set(Number(offset), card);
     }
   }
   return result;
@@ -297,6 +328,7 @@ export default class MentalPokerGameRoom {
             deck.cards[offset],
           );
           const card = decodeStandardCard(Number(fullyDecrypted));
+          storeRevealedBoardCard(round, offset, card);
           console.log(`The card [${offset}] has been decrypted: ${card.suit} ${card.rank}`);
           this.emitter.emit('card', round, offset, card);
         });
@@ -307,6 +339,11 @@ export default class MentalPokerGameRoom {
     });
 
     this.dataByRounds.set(round, newRoundData);
+    for (const [offset, card] of Array.from(loadRevealedBoardCards(round).entries())) {
+      setTimeout(() => {
+        this.emitter.emit('card', round, offset, card);
+      }, 0);
+    }
     return newRoundData;
   }
 

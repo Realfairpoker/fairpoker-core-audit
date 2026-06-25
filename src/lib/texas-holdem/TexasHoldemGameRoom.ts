@@ -80,6 +80,18 @@ export interface TexasHoldemRoundSettings {
   seriesStartRound?: number;
 }
 
+export interface TexasHoldemStateSnapshot {
+  currentRound?: number;
+  playersByRound: Map<number, string[]>;
+  boardByRound: Map<number, Board>;
+  holesByRound: Map<number, Map<string, Hole>>;
+  whoseTurnByRound: Map<number, { whoseTurn: string; callAmount: number } | null>;
+  potAmount: number;
+  bankrolls: Map<string, number>;
+  winnersByRound: Map<number, WinningResult>;
+  settingsByRound: Map<number, TexasHoldemRoundSettings>;
+}
+
 export const DEFAULT_SMALL_BLIND_AMOUNT = 1;
 export const DEFAULT_BIG_BLIND_AMOUNT = 2;
 export const DEFAULT_AUTO_FOLD_TIMEOUT_SECONDS = 60;
@@ -209,6 +221,13 @@ export class TexasHoldemGameRoom {
 
   private funds: Map<string, number> = new Map();
   private sittingOutPlayers: Set<string> = new Set();
+  private playersByRound: Map<number, string[]> = new Map();
+  private boardByRound: Map<number, Board> = new Map();
+  private holesByRound: Map<number, Map<string, Hole>> = new Map();
+  private whoseTurnByRound: Map<number, { whoseTurn: string; callAmount: number } | null> = new Map();
+  private potAmount: number = 0;
+  private winnersByRound: Map<number, WinningResult> = new Map();
+  private settingsByRound: Map<number, TexasHoldemRoundSettings> = new Map();
 
   // During replay, Raft's applyCommitted fires all events synchronously via
   // EventEmitter.  Async handlers (handleBetEvent, handleFoldEvent) modify
@@ -370,6 +389,20 @@ export class TexasHoldemGameRoom {
     return this.gameRoom.getTranscript?.() ?? null;
   }
 
+  getStateSnapshot(): TexasHoldemStateSnapshot {
+    return {
+      currentRound: this.round || undefined,
+      playersByRound: new Map(Array.from(this.playersByRound.entries()).map(([round, players]) => [round, [...players]])),
+      boardByRound: new Map(Array.from(this.boardByRound.entries()).map(([round, board]) => [round, [...board] as Board])),
+      holesByRound: new Map(Array.from(this.holesByRound.entries()).map(([round, holes]) => [round, new Map(holes)])),
+      whoseTurnByRound: new Map(this.whoseTurnByRound),
+      potAmount: this.potAmount,
+      bankrolls: new Map(this.funds),
+      winnersByRound: new Map(this.winnersByRound),
+      settingsByRound: new Map(this.settingsByRound),
+    };
+  }
+
   private propagate(eventName: (keyof (MentalPokerGameRoomEvents | TexasHoldemGameRoomEvents))) {
     this.mentalPokerGameRoom.listener.on(eventName, this.lcm.register((...args) => {
       this.emitter.emit(eventName, ...args);
@@ -403,14 +436,17 @@ export class TexasHoldemGameRoom {
   private registerBoardEvents(round: number, roundData: TexasHoldemRound) {
     Promise.all(roundData.knownCards.slice(0, 3).map(d => d.promise)).then(flop => {
       roundData.stage = Stage.FLOP;
+      this.boardByRound.set(round, [...flop] as Flop);
       this.emitter.emit('board', round, flop as Flop);
     });
     Promise.all(roundData.knownCards.slice(0, 4).map(d => d.promise)).then(turn => {
       roundData.stage = Stage.TURN;
+      this.boardByRound.set(round, [...turn] as Turn);
       this.emitter.emit('board', round, turn as Turn);
     });
     Promise.all(roundData.knownCards.slice(0, 5).map(d => d.promise)).then(river => {
       roundData.stage = Stage.RIVER;
+      this.boardByRound.set(round, [...river] as River);
       this.emitter.emit('board', round, river as River);
     });
   }
@@ -425,6 +461,9 @@ export class TexasHoldemGameRoom {
         const hole: Hole = [hole1, hole2];
         const playerOffset = Math.floor((i - 5) / 2);
         if (playerOffset < playersOrdered.length) {
+          const holes = this.holesByRound.get(round) ?? new Map<string, Hole>();
+          holes.set(playersOrdered[playerOffset], hole);
+          this.holesByRound.set(round, holes);
           this.emitter.emit('hole', round, playersOrdered[playerOffset], hole);
         }
       });
@@ -506,6 +545,7 @@ export class TexasHoldemGameRoom {
       showdown: result,
     };
     this.clearTurnTimer(roundData);
+    this.winnersByRound.set(round, roundData.result);
     this.emitter.emit('winner', roundData.result);
 
     const awards = this.calculateAwards(roundData, result);
@@ -566,6 +606,8 @@ export class TexasHoldemGameRoom {
 
     const roundData = this.getOrCreateDataForRound(e.round);
     roundData.settings = normalizedSettings;
+    this.settingsByRound.set(e.round, normalizedSettings);
+    this.playersByRound.set(e.round, [...e.players]);
     roundData.playersOrdered.resolve(e.players);
     this.emitter.emit('roundSettings', e.round, roundData.settings);
     this.emitter.emit('players', e.round, e.players);
@@ -629,6 +671,7 @@ export class TexasHoldemGameRoom {
     this.clearTurnTimer(roundData);
     roundData.currentTurn = whose;
     roundData.currentTurnStartedAtMs = whose ? Date.now() : 0;
+    this.whoseTurnByRound.set(round, whose ? {whoseTurn: whose, callAmount: actionMeta?.callAmount ?? 0} : null);
     if (actionMeta) {
       this.emitter.emit('whoseTurn', round, whose, actionMeta);
     } else {
@@ -711,6 +754,7 @@ export class TexasHoldemGameRoom {
 
     this.emitter.emit('bet', roundNo, raisedAmount, who, allin);
     const potTotalAmount = Array.from(round.pot.values()).reduce((a, b) => a + b, 0);
+    this.potAmount = potTotalAmount;
     this.emitter.emit('pot', roundNo, potTotalAmount);
 
     if (!isSbBbFirstBet) {
@@ -752,6 +796,7 @@ export class TexasHoldemGameRoom {
       };
       round.result = result;
       this.clearTurnTimer(round);
+      this.winnersByRound.set(roundNo, result);
       this.emitter.emit('winner', result);
       const totalPotAmount = Array.from(round.pot.values()).reduce((m1, m2) => m1 + m2, 0);
       const newFundOfWinner = (this.funds.get(winner) ?? 0) + totalPotAmount;

@@ -67,8 +67,12 @@ function useGameSetup() {
     };
   }, []);
 
-  const [currentRound, setCurrentRound] = useState<number>();
-  const [players, setPlayers] = useState<string[]>();
+  const initialSnapshot = TexasHoldem.getStateSnapshot();
+  const [currentRound, setCurrentRound] = useState<number | undefined>(() => initialSnapshot.currentRound);
+  const [players, setPlayers] = useState<string[] | undefined>(() => {
+    const round = initialSnapshot.currentRound;
+    return round ? initialSnapshot.playersByRound.get(round) : undefined;
+  });
 
   useEffect(() => {
     const newRoundListener = (round: number, players: string[]) => {
@@ -96,7 +100,7 @@ function useGameSetup() {
 }
 
 function useBankrolls() {
-  const [bankrolls, setBankrolls] = useState<Map<string, number>>(new Map());
+  const [bankrolls, setBankrolls] = useState<Map<string, number>>(() => TexasHoldem.getStateSnapshot().bankrolls);
   useEffect(() => {
     const fundListener: TexasHoldemGameRoomEvents['fund'] = (fund, previousFund, whose) => {
       setBankrolls(prev => {
@@ -155,7 +159,7 @@ export type BoardStage =
   ;
 
 function useBoard(round: number | undefined) {
-  const [boardPerRound, setBoardPerRound] = useState<Map<number, Board>>(new Map());
+  const [boardPerRound, setBoardPerRound] = useState<Map<number, Board>>(() => TexasHoldem.getStateSnapshot().boardByRound);
   useEffect(() => {
     const boardListener = (round: number, board: Board) => {
       setBoardPerRound(prev => {
@@ -192,7 +196,7 @@ function useBoard(round: number | undefined) {
 }
 
 function useHoles(round: number | undefined, myPlayerId: string | undefined) {
-  const [holesPerPlayerPerRound, setHolesPerPlayerPerRound] = useState<Map<number, Map<string, Hole>>>(new Map());
+  const [holesPerPlayerPerRound, setHolesPerPlayerPerRound] = useState<Map<number, Map<string, Hole>>>(() => TexasHoldem.getStateSnapshot().holesByRound);
   useEffect(() => {
     const holeListener = (round: number, whose: string, hole: Hole) => {
       setHolesPerPlayerPerRound(prev => {
@@ -227,7 +231,7 @@ function useHoles(round: number | undefined, myPlayerId: string | undefined) {
 }
 
 function useWhoseTurnAndCallAmount(round: number | undefined) {
-  const [whoseTurnPerRound, setWhoseTurnPerRound] = useState<Map<number, { whoseTurn: string, callAmount: number } | null>>(new Map());
+  const [whoseTurnPerRound, setWhoseTurnPerRound] = useState<Map<number, { whoseTurn: string, callAmount: number } | null>>(() => TexasHoldem.getStateSnapshot().whoseTurnByRound);
   useEffect(() => {
     const whoseTurnListener = (round: number, whoseTurn: string | null, actionMeta?: { callAmount: number }) => {
       setWhoseTurnPerRound(prev => {
@@ -246,7 +250,7 @@ function useWhoseTurnAndCallAmount(round: number | undefined) {
 }
 
 function usePotAmount() {
-  const [potAmount, setPotAmount] = useState<number>(0);
+  const [potAmount, setPotAmount] = useState<number>(() => TexasHoldem.getStateSnapshot().potAmount);
   useEffect(() => {
     const potListener = (round: number, amount: number) => {
       setPotAmount(amount);
@@ -391,8 +395,16 @@ function useMyBetAmount(round: number | undefined, myPlayerId: string | undefine
 }
 
 function useShowdownAndWinner(round: number | undefined) {
-  const [lastWinningResult, setLastWinningResult] = useState<WinningResult>();
-  const [finishedPerRound, setFinishedPerRound] = useState<Map<number, true>>(new Map());
+  const initialWinners = TexasHoldem.getStateSnapshot().winnersByRound;
+  const [lastWinningResult, setLastWinningResult] = useState<WinningResult | undefined>(() => {
+    if (!initialWinners.size) {
+      return undefined;
+    }
+    return Array.from(initialWinners.entries()).sort(([r1], [r2]) => r2 - r1)[0][1];
+  });
+  const [finishedPerRound, setFinishedPerRound] = useState<Map<number, true>>(() => (
+    new Map(Array.from(initialWinners.keys()).map(finishedRound => [finishedRound, true]))
+  ));
   useEffect(() => {
     const winnerListener = (result: WinningResult) => {
       setLastWinningResult(result);
@@ -416,7 +428,7 @@ function useShowdownAndWinner(round: number | undefined) {
 }
 
 function useRoundSettings(round: number | undefined) {
-  const [settingsPerRound, setSettingsPerRound] = useState<Map<number, TexasHoldemRoundSettings>>(new Map());
+  const [settingsPerRound, setSettingsPerRound] = useState<Map<number, TexasHoldemRoundSettings>>(() => TexasHoldem.getStateSnapshot().settingsByRound);
 
   useEffect(() => {
     const roundSettingsListener: TexasHoldemGameRoomEvents['roundSettings'] = (round, settings) => {
