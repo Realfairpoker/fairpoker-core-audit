@@ -272,6 +272,59 @@ describe('TexasHoldemGameRoom', () => {
     expect(foldEvents).toEqual([[1, 'C']]);
   });
 
+  test('auto-folds a disconnected player immediately when their later turn arrives', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+    const foldEvents: Array<[number, string]> = [];
+    texasHoldemGameRoom.listener.on('fold', (round, who) => {
+      foldEvents.push([round, who]);
+    });
+    const firstTurnPromise = new Promise<string | null>(resolve => {
+      texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
+        if (who === 'C') {
+          resolve(who);
+        }
+      });
+    });
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+      autoFoldTimeoutSeconds: 60,
+    });
+    await expect(firstTurnPromise).resolves.toBe('C');
+
+    mockMentalPokerGameRoom.members = ['B', 'C'];
+    mockMentalPokerGameRoom.listener.emit('members', ['B', 'C']);
+
+    const autoFoldHandled = new Promise<void>(resolve => {
+      texasHoldemGameRoom.listener.on('fold', (_round, who) => {
+        if (who === 'A') {
+          resolve();
+        }
+      });
+    });
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'C',
+      data: {
+        type: 'action/bet',
+        round: 1,
+        amount: 2,
+      },
+    }, 'C', false);
+    await autoFoldHandled;
+
+    expect(mockGameRoom.lastEventEmitted.data).toEqual({
+      type: 'action/autoFold',
+      round: 1,
+      target: 'A',
+    });
+    expect(foldEvents).toContainEqual([1, 'A']);
+  });
+
   test('replayed current turn restarts auto-fold after reconnect', async () => {
     jest.useFakeTimers();
     try {

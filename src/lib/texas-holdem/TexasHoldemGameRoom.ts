@@ -823,9 +823,12 @@ export class TexasHoldemGameRoom {
     const timeoutSeconds = roundData.settings?.autoFoldTimeoutSeconds;
     const timeoutMs = timeoutSeconds ? timeoutSeconds * 1000 : 0;
     const replayedOpponentTurn = replay && whose !== this.mentalPokerGameRoom.peerId;
-    const timerDelayMs = replayedOpponentTurn && timeoutMs
-      ? Math.min(REPLAY_AUTO_FOLD_GRACE_MS, timeoutMs)
-      : timeoutMs;
+    const disconnectedTurn = Boolean(whose && !this.mentalPokerGameRoom.members.includes(whose));
+    const timerDelayMs = disconnectedTurn
+      ? 0
+      : replayedOpponentTurn && timeoutMs
+        ? Math.min(REPLAY_AUTO_FOLD_GRACE_MS, timeoutMs)
+        : timeoutMs;
     roundData.currentTurn = whose;
     roundData.currentTurnStartedAtMs = whose
       ? Date.now() - Math.max(0, timeoutMs - timerDelayMs)
