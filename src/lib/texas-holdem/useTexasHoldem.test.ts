@@ -531,8 +531,8 @@ describe('useTexasHoldem', () => {
       await result.current.startGame();
     });
 
-    expect(mockStartNewRound).toHaveBeenCalledWith({
-      bits: 128,
+  expect(mockStartNewRound).toHaveBeenCalledWith({
+      bits: 256,
       initialFundAmount: 100,
       smallBlindAmount: 1,
       bigBlindAmount: 2,
@@ -568,7 +568,7 @@ describe('useTexasHoldem', () => {
     });
 
     expect(mockStartNewRound).toHaveBeenCalledWith({
-      bits: 128,
+      bits: 256,
       initialFundAmount: 500,
       smallBlindAmount: 1,
       bigBlindAmount: 2,
@@ -585,8 +585,8 @@ describe('useTexasHoldem', () => {
       await result.current.startGame({initialFundAmount: 500, smallBlindAmount: 5, bigBlindAmount: 10});
     });
 
-    expect(mockStartNewRound).toHaveBeenCalledWith({
-      bits: 128,
+  expect(mockStartNewRound).toHaveBeenCalledWith({
+      bits: 256,
       initialFundAmount: 500,
       smallBlindAmount: 5,
       bigBlindAmount: 10,

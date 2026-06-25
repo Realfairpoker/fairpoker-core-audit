@@ -20,7 +20,7 @@ export type StandardDeck = StandardCard[];
 const SUITS: Suit[] = ['Heart', 'Diamond', 'Club', 'Spade'];
 const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
 
-export const DEFAULT_MENTAL_POKER_BITS = 128;
+export const DEFAULT_MENTAL_POKER_BITS = 256;
 export const MIN_MENTAL_POKER_BITS = 128;
 
 export function normalizeMentalPokerBits(bits?: number): number {

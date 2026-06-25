@@ -248,3 +248,26 @@ export async function login(username: string, password: string) {
   const vault = await decryptVault(result.vault, password);
   return installSession(result.session, vault);
 }
+
+export async function enterAccount(username: string, password: string) {
+  const usernameError = validateUsername(username);
+  const passwordError = validatePassword(password);
+  if (usernameError || passwordError) {
+    throw new Error(usernameError || passwordError);
+  }
+  const vault = await createRegisteredVault();
+  const encryptedVault = await encryptVault(vault, password);
+  const result = await requestJson<{
+    created: boolean;
+    session: AuthSession;
+    vault?: EncryptedAuthVault;
+  }>('/auth/enter', {
+    username: cleanUsername(username),
+    password,
+    vault: encryptedVault,
+  });
+  const activeVault = result.created
+    ? vault
+    : await decryptVault(result.vault as EncryptedAuthVault, password);
+  return installSession(result.session, activeVault);
+}
