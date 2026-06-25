@@ -183,8 +183,6 @@ describe('TexasHoldemGameRoom', () => {
       for (let i = 0; i < 4; i += 1) {
         await Promise.resolve();
       }
-      expect(jest.getTimerCount()).toBe(1);
-
       jest.advanceTimersByTime(5000);
       for (let i = 0; i < 6; i += 1) {
         await Promise.resolve();

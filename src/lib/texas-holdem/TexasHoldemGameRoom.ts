@@ -102,6 +102,7 @@ export const DEFAULT_PLANNED_ROUNDS = 10;
 const MIN_PLANNED_ROUNDS = 1;
 const MAX_PLANNED_ROUNDS = 100;
 const REPLAY_AUTO_FOLD_GRACE_MS = 4000;
+const HOLE_KEY_RETRY_DELAYS_MS = [400, 1200, 2600, 5000];
 
 enum Stage {
   PRE_FLOP = 0,
@@ -229,6 +230,7 @@ export class TexasHoldemGameRoom {
   private potAmount: number = 0;
   private winnersByRound: Map<number, WinningResult> = new Map();
   private settingsByRound: Map<number, TexasHoldemRoundSettings> = new Map();
+  private holeKeyRetryTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
   // During replay, Raft's applyCommitted fires all events synchronously via
   // EventEmitter.  Async handlers (handleBetEvent, handleFoldEvent) modify
@@ -391,6 +393,10 @@ export class TexasHoldemGameRoom {
     for (const roundData of Array.from(this.dataByRounds.values())) {
       this.clearTurnTimer(roundData);
     }
+    for (const timer of Array.from(this.holeKeyRetryTimers)) {
+      clearTimeout(timer);
+    }
+    this.holeKeyRetryTimers.clear();
     this.lcm.close();
   }
 
@@ -623,16 +629,8 @@ export class TexasHoldemGameRoom {
     roundData.initialFunds.resolve(new Map(this.funds));
 
     if (!replay) {
-      // [0] to [4] are the board cards, hole cards start from [5]
-      for (let i = 0; i < e.players.length; ++i) {
-        const holeOffsets = [
-          i * 2 + 5,
-          i * 2 + 6,
-        ];
-
-        await this.mentalPokerGameRoom.dealCard(e.round, holeOffsets[0], e.players[i]);
-        await this.mentalPokerGameRoom.dealCard(e.round, holeOffsets[1], e.players[i]);
-      }
+      await this.dealInitialHoleCards(e.round, e.players);
+      this.scheduleHoleKeyRetry(e.round, e.players, roundData);
     }
 
     // Process blind bets synchronously (no await) to avoid race conditions
@@ -648,6 +646,53 @@ export class TexasHoldemGameRoom {
     this.emitWhoseTurn(e.round, roundData, playerNextToBb, {
       callAmount: e.players.length === 2 ? bigBlindAmount - smallBlindAmount : bigBlindAmount,
     }, replay);
+  }
+
+  private async dealInitialHoleCards(round: number, players: string[]) {
+    // [0] to [4] are the board cards, hole cards start from [5].
+    // Re-sending these private decrypt-key events is safe: each event carries
+    // the same per-card key and Deferred resolution is idempotent.
+    for (let i = 0; i < players.length; ++i) {
+      const holeOffsets = [
+        i * 2 + 5,
+        i * 2 + 6,
+      ];
+
+      await this.mentalPokerGameRoom.dealCard(round, holeOffsets[0], players[i]);
+      await this.mentalPokerGameRoom.dealCard(round, holeOffsets[1], players[i]);
+    }
+  }
+
+  private scheduleHoleKeyRetry(round: number, players: string[], roundData: TexasHoldemRound, attempt = 0) {
+    const delayMs = HOLE_KEY_RETRY_DELAYS_MS[attempt];
+    if (delayMs === undefined || roundData.result || this.areInitialHoleCardsKnown(players, roundData)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.holeKeyRetryTimers.delete(timer);
+      if (roundData.result || this.areInitialHoleCardsKnown(players, roundData)) {
+        return;
+      }
+      void this.dealInitialHoleCards(round, players)
+        .catch(error => {
+          console.warn(`Unable to retry initial hole key delivery for round ${round}.`, error);
+        })
+        .finally(() => {
+          this.scheduleHoleKeyRetry(round, players, roundData, attempt + 1);
+        });
+    }, delayMs);
+    this.holeKeyRetryTimers.add(timer);
+  }
+
+  private areInitialHoleCardsKnown(players: string[], roundData: TexasHoldemRound) {
+    for (let i = 0; i < players.length; ++i) {
+      const firstOffset = i * 2 + 5;
+      const secondOffset = i * 2 + 6;
+      if (!roundData.knownCardValues.has(firstOffset) || !roundData.knownCardValues.has(secondOffset)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private async handleBetEvent(e: BetEvent, who: string, replay: boolean) {

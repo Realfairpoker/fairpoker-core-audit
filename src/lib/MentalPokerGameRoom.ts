@@ -439,18 +439,23 @@ export default class MentalPokerGameRoom {
       return;
     }
 
+    const myPeerId = await this.gameRoom.peerIdAsync;
     const participants = await this.participantsForRound(roundData);
     for (const participant of participants) {
       const dk = await this.getDecryptionKeyForCard(roundData, cardOffset, participant);
       if (dk) {
-        console.debug(`Dealing the card [ ${cardOffset} ] to ${recipient}.`);
-        await this.firePrivateEvent({
+        const event: DecryptCardEvent = {
           type: 'card/decrypt',
           round,
           cardOffset,
           player: participant,
           decryptionKey: dk,
-        }, recipient);
+        };
+        if (recipient === myPeerId) {
+          await this.handleCardDecrypted(event);
+        }
+        console.debug(`Dealing the card [ ${cardOffset} ] to ${recipient}.`);
+        await this.firePrivateEvent(event, recipient);
       }
     }
   }
