@@ -4,7 +4,8 @@ import {
   MentalPokerGameRoomLike,
   TexasHoldemGameRoom,
   TexasHoldemGameRoomEvents,
-  TexasHoldemTableEvent
+  TexasHoldemTableEvent,
+  WinningResult
 } from "./TexasHoldemGameRoom";
 import Deferred from "../Deferred";
 import EventEmitter from "eventemitter3";
@@ -350,6 +351,55 @@ describe('TexasHoldemGameRoom', () => {
       },
     }, 'A', true);
     await autoFoldHandled;
+
+    const secondPlayersPromise = new Promise<string[]>(resolve => {
+      texasHoldemGameRoom.listener.once('players', (_round, players) => resolve(players));
+    });
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await expect(secondPlayersPromise).resolves.toEqual(['B', 'A']);
+  });
+
+  test('active sit-out folds current hand and leaves the next round', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    const firstPlayersPromise = new Promise<string[]>(resolve => {
+      texasHoldemGameRoom.listener.once('players', (_round, players) => resolve(players));
+    });
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await expect(firstPlayersPromise).resolves.toEqual(['A', 'B', 'C']);
+
+    const foldEvents: Array<[number, string]> = [];
+    const winnerEvents: WinningResult[] = [];
+    texasHoldemGameRoom.listener.on('fold', (round, who) => {
+      foldEvents.push([round, who]);
+    });
+    texasHoldemGameRoom.listener.on('winner', result => {
+      winnerEvents.push(result);
+    });
+
+    const sitOutHandled = new Promise<void>(resolve => {
+      texasHoldemGameRoom.listener.once('fold', () => resolve());
+    });
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'C',
+      data: {
+        type: 'action/sitOut',
+        round: 1,
+      },
+    }, 'C', false);
+    await sitOutHandled;
+
+    expect(foldEvents).toEqual([[1, 'C']]);
+    expect(winnerEvents).toEqual([]);
 
     const secondPlayersPromise = new Promise<string[]>(resolve => {
       texasHoldemGameRoom.listener.once('players', (_round, players) => resolve(players));

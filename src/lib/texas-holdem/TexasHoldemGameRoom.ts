@@ -135,11 +135,17 @@ export interface AutoFoldEvent {
   target: string;
 }
 
+export interface SitOutEvent {
+  type: 'action/sitOut';
+  round: number;
+}
+
 export type TexasHoldemTableEvent =
   | NewRoundEvent
   | BetEvent
   | FoldEvent
-  | AutoFoldEvent;
+  | AutoFoldEvent
+  | SitOutEvent;
 
 function normalizeAutoFoldTimeoutSeconds(timeoutSeconds: number | undefined) {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds === undefined) {
@@ -280,6 +286,8 @@ export class TexasHoldemGameRoom {
             return this.handleFoldEvent(data, who, !!replay);
           case 'action/autoFold':
             return this.handleAutoFoldEvent(data, !!replay);
+          case 'action/sitOut':
+            return this.handleSitOutEvent(data, who, !!replay);
         }
       };
 
@@ -378,6 +386,18 @@ export class TexasHoldemGameRoom {
         type: 'action/autoFold',
         round,
         target,
+      },
+    });
+  }
+
+  async sitOut(round: number) {
+    await this.clearLocalTurnTimerForSubmittedAction(round);
+    await this.gameRoom.emitEvent({
+      type: 'public',
+      sender: await this.gameRoom.peerIdAsync,
+      data: {
+        type: 'action/sitOut',
+        round,
       },
     });
   }
@@ -718,6 +738,19 @@ export class TexasHoldemGameRoom {
     }
     this.sittingOutPlayers.add(e.target);
     await this.handleFold(e.round, e.target, replay);
+  }
+
+  private async handleSitOutEvent(e: SitOutEvent, who: string, replay: boolean) {
+    const round = this.getOrCreateDataForRound(e.round);
+    this.sittingOutPlayers.add(who);
+    if (round.result) {
+      return;
+    }
+    const players = await round.playersOrdered.promise;
+    if (!players.includes(who)) {
+      return;
+    }
+    await this.handleFold(e.round, who, replay);
   }
 
   private handleMembersChanged(members: string[]) {

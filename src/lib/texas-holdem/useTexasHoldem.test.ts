@@ -19,10 +19,12 @@ const emitter = new EventEmitter<TexasHoldemGameRoomEvents>();
 };
 (TexasHoldem as any).bet = jest.fn().mockResolvedValue(undefined);
 (TexasHoldem as any).fold = jest.fn().mockResolvedValue(undefined);
+(TexasHoldem as any).sitOut = jest.fn().mockResolvedValue(undefined);
 (TexasHoldem as any).startNewRound = jest.fn().mockResolvedValue(undefined);
 
 const mockBet = (TexasHoldem as any).bet as jest.Mock;
 const mockFold = (TexasHoldem as any).fold as jest.Mock;
+const mockSitOut = (TexasHoldem as any).sitOut as jest.Mock;
 const mockStartNewRound = (TexasHoldem as any).startNewRound as jest.Mock;
 
 const defaultSnapshot = () => ({
@@ -45,6 +47,7 @@ beforeEach(() => {
   (TexasHoldem as any).getStateSnapshot = jest.fn(defaultSnapshot);
   mockBet.mockClear();
   mockFold.mockClear();
+  mockSitOut.mockClear();
   mockStartNewRound.mockClear();
 });
 
@@ -558,6 +561,30 @@ describe('useTexasHoldem', () => {
     });
 
     expect(mockFold).not.toHaveBeenCalled();
+  });
+
+  test('sitOut calls TexasHoldem.sitOut with current round', async () => {
+    const {result} = renderHook(() => useTexasHoldem());
+
+    act(() => {
+      emitter.emit('players', 1, ['A', 'B']);
+    });
+
+    await act(async () => {
+      await result.current.actions.sitOut();
+    });
+
+    expect(mockSitOut).toHaveBeenCalledWith(1);
+  });
+
+  test('sitOut does nothing when no round', async () => {
+    const {result} = renderHook(() => useTexasHoldem());
+
+    await act(async () => {
+      await result.current.actions.sitOut();
+    });
+
+    expect(mockSitOut).not.toHaveBeenCalled();
   });
 
   test('startGame calls TexasHoldem.startNewRound with defaults', async () => {
