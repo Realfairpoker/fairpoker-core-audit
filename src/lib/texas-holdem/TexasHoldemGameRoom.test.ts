@@ -454,6 +454,57 @@ describe('TexasHoldemGameRoom', () => {
     });
     await expect(secondPlayersPromise).resolves.toEqual(['B', 'C', 'A']);
   });
+
+  test('auto-folded online player can return to the next round from the table prompt', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    const firstTurnPromise = new Promise<string | null>(resolve => {
+      texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
+        if (who === 'C') {
+          resolve(who);
+        }
+      });
+    });
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await expect(firstTurnPromise).resolves.toBe('C');
+
+    const autoFoldHandled = new Promise<void>(resolve => {
+      texasHoldemGameRoom.listener.once('fold', () => resolve());
+    });
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'A',
+      data: {
+        type: 'action/autoFold',
+        round: 1,
+        target: 'C',
+      },
+    }, 'A', true);
+    await autoFoldHandled;
+
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'C',
+      data: {
+        type: 'action/returnToTable',
+        round: 1,
+      },
+    }, 'C', false);
+
+    const secondPlayersPromise = new Promise<string[]>(resolve => {
+      texasHoldemGameRoom.listener.once('players', (_round, players) => resolve(players));
+    });
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await expect(secondPlayersPromise).resolves.toEqual(['B', 'C', 'A']);
+  });
 });
 
 describe('TexasHoldemGameRoom replay serialization', () => {

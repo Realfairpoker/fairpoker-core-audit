@@ -521,6 +521,13 @@ export default function useTexasHoldem() {
     await TexasHoldem.sitOut(currentRound);
   }, [currentRound]);
 
+  const returnToTable = useCallback(async () => {
+    if (!currentRound) {
+      return;
+    }
+    await TexasHoldem.returnToTable(currentRound);
+  }, [currentRound]);
+
   const actionsDone = useActionsDone(currentRound);
 
   const potAmount = usePotAmount();
@@ -577,6 +584,7 @@ export default function useTexasHoldem() {
       fireBet,
       fireFold,
       sitOut,
+      returnToTable,
     },
   };
 }

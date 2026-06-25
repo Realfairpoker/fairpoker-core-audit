@@ -140,12 +140,18 @@ export interface SitOutEvent {
   round: number;
 }
 
+export interface ReturnToTableEvent {
+  type: 'action/returnToTable';
+  round: number;
+}
+
 export type TexasHoldemTableEvent =
   | NewRoundEvent
   | BetEvent
   | FoldEvent
   | AutoFoldEvent
-  | SitOutEvent;
+  | SitOutEvent
+  | ReturnToTableEvent;
 
 function normalizeAutoFoldTimeoutSeconds(timeoutSeconds: number | undefined) {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds === undefined) {
@@ -288,6 +294,8 @@ export class TexasHoldemGameRoom {
             return this.handleAutoFoldEvent(data, !!replay);
           case 'action/sitOut':
             return this.handleSitOutEvent(data, who, !!replay);
+          case 'action/returnToTable':
+            return this.handleReturnToTableEvent(data, who);
         }
       };
 
@@ -397,6 +405,17 @@ export class TexasHoldemGameRoom {
       sender: await this.gameRoom.peerIdAsync,
       data: {
         type: 'action/sitOut',
+        round,
+      },
+    });
+  }
+
+  async returnToTable(round: number) {
+    await this.gameRoom.emitEvent({
+      type: 'public',
+      sender: await this.gameRoom.peerIdAsync,
+      data: {
+        type: 'action/returnToTable',
         round,
       },
     });
@@ -751,6 +770,10 @@ export class TexasHoldemGameRoom {
       return;
     }
     await this.handleFold(e.round, who, replay);
+  }
+
+  private handleReturnToTableEvent(_e: ReturnToTableEvent, who: string) {
+    this.sittingOutPlayers.delete(who);
   }
 
   private handleMembersChanged(members: string[]) {
