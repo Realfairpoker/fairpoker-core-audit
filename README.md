@@ -57,16 +57,16 @@ transcript replay.
 ## Cryptographic Parameter Evidence
 
 The mental-poker SRA key size is not an 8-bit runtime setting. The core helper
-defines `DEFAULT_MENTAL_POKER_BITS = 256` and `MIN_MENTAL_POKER_BITS = 128` in
+defines `DEFAULT_MENTAL_POKER_BITS = 128` and `MIN_MENTAL_POKER_BITS = 128` in
 `src/lib/secureMentalPoker.ts`; `createPlayer` normalizes through
 `normalizeMentalPokerBits` and rejects any value below the minimum before key
 generation. The room code in `src/lib/MentalPokerGameRoom.ts` calls
 `createPlayer` with `settings.bits ?? DEFAULT_MENTAL_POKER_BITS`.
 
 Therefore, a review must not infer an 8-bit SRA game from stale cached source
-or old snippets. The current core source evidence is: default 256-bit SRA,
-minimum accepted 128-bit SRA, and no legacy 8-bit fallback in the published
-source package.
+or old snippets. The current core source evidence is: default 128-bit SRA,
+minimum accepted 128-bit SRA, optional 256-bit SRA, and no legacy 8-bit fallback
+in the published source package.
 
 ## Signed Event Enforcement Evidence
 
