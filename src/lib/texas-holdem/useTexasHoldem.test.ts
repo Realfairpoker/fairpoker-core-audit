@@ -25,11 +25,24 @@ const mockBet = (TexasHoldem as any).bet as jest.Mock;
 const mockFold = (TexasHoldem as any).fold as jest.Mock;
 const mockStartNewRound = (TexasHoldem as any).startNewRound as jest.Mock;
 
+const defaultSnapshot = () => ({
+  currentRound: undefined,
+  playersByRound: new Map(),
+  boardByRound: new Map(),
+  holesByRound: new Map(),
+  whoseTurnByRound: new Map(),
+  potAmount: 0,
+  winnersByRound: new Map(),
+  settingsByRound: new Map(),
+  bankrolls: new Map(),
+});
+
 beforeEach(() => {
   emitter.removeAllListeners();
   delete (TexasHoldem as any).peerId;
   delete (TexasHoldem as any).status;
   delete (TexasHoldem as any).members;
+  (TexasHoldem as any).getStateSnapshot = jest.fn(defaultSnapshot);
   mockBet.mockClear();
   mockFold.mockClear();
   mockStartNewRound.mockClear();
@@ -127,6 +140,29 @@ describe('useTexasHoldem', () => {
     expect(result.current.smallBlind).toBe('Alice');
     expect(result.current.bigBlind).toBe('Bob');
     expect(result.current.button).toBe('Bob');
+  });
+
+  test('winner event restores round and players from snapshot when the client missed setup', () => {
+    (TexasHoldem as any).getStateSnapshot = jest.fn(() => ({
+      ...defaultSnapshot(),
+      playersByRound: new Map([[1, ['A', 'B']]]),
+    }));
+    const {result} = renderHook(() => useTexasHoldem());
+
+    const winResult: WinningResult = {
+      how: 'LastOneWins',
+      round: 1,
+      winner: 'B',
+    };
+
+    act(() => {
+      emitter.emit('winner', winResult);
+    });
+
+    expect(result.current.round).toBe(1);
+    expect(result.current.players).toEqual(['A', 'B']);
+    expect(result.current.currentRoundFinished).toBe(true);
+    expect(result.current.lastWinningResult).toEqual(winResult);
   });
 
   test('fund events update bankrolls', () => {

@@ -293,8 +293,17 @@ export class TexasHoldemGameRoom {
 
   async startNewRound(settings: TexasHoldemRoundSettings) {
     const normalizedSettings = normalizeRoundSettings(settings, settings.seriesStartRound ?? this.round + 1);
-    const players: string[] = this.mentalPokerGameRoom.members
+    const seatedPlayers = this.mentalPokerGameRoom.members
       .filter(player => !this.sittingOutPlayers.has(player));
+    const seatedPlayerSet = new Set(seatedPlayers);
+    const previousPlayers = this.playersByRound.get(this.round);
+    const previousPlayersStillSeated = previousPlayers
+      ? previousPlayers.filter(player => seatedPlayerSet.has(player))
+      : [];
+    const newSeatedPlayers = seatedPlayers.filter(player => !previousPlayersStillSeated.includes(player));
+    const players: string[] = previousPlayersStillSeated.length > 0
+      ? [...previousPlayersStillSeated, ...newSeatedPlayers]
+      : seatedPlayers;
     if (players.length < 2) {
       throw new Error('There should be at least 2 players to start a new round.');
     }
@@ -665,12 +674,12 @@ export class TexasHoldemGameRoom {
 
   private scheduleHoleKeyRetry(round: number, players: string[], roundData: TexasHoldemRound, attempt = 0) {
     const delayMs = HOLE_KEY_RETRY_DELAYS_MS[attempt];
-    if (delayMs === undefined || roundData.result || this.areInitialHoleCardsKnown(players, roundData)) {
+    if (delayMs === undefined || roundData.result || this.areLocalInitialHoleCardsKnown(players, roundData)) {
       return;
     }
     const timer = setTimeout(() => {
       this.holeKeyRetryTimers.delete(timer);
-      if (roundData.result || this.areInitialHoleCardsKnown(players, roundData)) {
+      if (roundData.result || this.areLocalInitialHoleCardsKnown(players, roundData)) {
         return;
       }
       void this.dealInitialHoleCards(round, players)
@@ -684,15 +693,18 @@ export class TexasHoldemGameRoom {
     this.holeKeyRetryTimers.add(timer);
   }
 
-  private areInitialHoleCardsKnown(players: string[], roundData: TexasHoldemRound) {
-    for (let i = 0; i < players.length; ++i) {
-      const firstOffset = i * 2 + 5;
-      const secondOffset = i * 2 + 6;
-      if (!roundData.knownCardValues.has(firstOffset) || !roundData.knownCardValues.has(secondOffset)) {
-        return false;
-      }
+  private areLocalInitialHoleCardsKnown(players: string[], roundData: TexasHoldemRound) {
+    const peerId = this.peerId;
+    if (!peerId) {
+      return true;
     }
-    return true;
+    const playerOffset = players.indexOf(peerId);
+    if (playerOffset < 0) {
+      return true;
+    }
+    const firstOffset = playerOffset * 2 + 5;
+    const secondOffset = playerOffset * 2 + 6;
+    return roundData.knownCardValues.has(firstOffset) && roundData.knownCardValues.has(secondOffset);
   }
 
   private async handleBetEvent(e: BetEvent, who: string, replay: boolean) {

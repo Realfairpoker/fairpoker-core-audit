@@ -79,9 +79,21 @@ function useGameSetup() {
       setCurrentRound(round);
       setPlayers(players);
     };
+    const winnerListener: TexasHoldemGameRoomEvents['winner'] = (result) => {
+      setCurrentRound(prev => prev ?? result.round);
+      setPlayers(prev => {
+        if (prev?.length) {
+          return prev;
+        }
+        const playersFromSnapshot = TexasHoldem.getStateSnapshot().playersByRound.get(result.round);
+        return playersFromSnapshot ? [...playersFromSnapshot] : prev;
+      });
+    };
     TexasHoldem.listener.on('players', newRoundListener);
+    TexasHoldem.listener.on('winner', winnerListener);
     return () => {
       TexasHoldem.listener.off('players', newRoundListener);
+      TexasHoldem.listener.off('winner', winnerListener);
     };
   }, []);
 

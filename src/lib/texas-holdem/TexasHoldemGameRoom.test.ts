@@ -56,8 +56,10 @@ class MockMentalPokerGameRoom implements MentalPokerGameRoomLike {
 
   shownCards: Parameters<typeof this.showCard>[] = [];
   dealtCards: Parameters<typeof this.dealCard>[] = [];
+  startedRounds: MentalPokerRoundSettings[] = [];
 
   async startNewRound(settings: MentalPokerRoundSettings) {
+    this.startedRounds.push(settings);
     const round = ++this.round;
     // Emit shuffled asynchronously so the caller can register a listener first
     setTimeout(() => this.listener.emit('shuffled'), 0);
@@ -157,6 +159,38 @@ describe('TexasHoldemGameRoom', () => {
       [1, 6, 'A'],
       [1, 7, 'B'],
       [1, 8, 'B'],
+    ]);
+  });
+
+  test('next round rotation uses the previous canonical player order', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('B');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+
+    mockMentalPokerGameRoom.members = ['B', 'A'];
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+
+    const newRoundEvents = mockGameRoom.eventsEmitted
+      .filter((event): event is GameEvent<TexasHoldemTableEvent> & {type: 'public'; data: {type: 'newRound'; players: string[]}} => (
+        event.type === 'public' && event.data.type === 'newRound'
+      ))
+      .map(event => event.data.players);
+    expect(newRoundEvents).toEqual([
+      ['A', 'B'],
+      ['B', 'A'],
+    ]);
+    expect(mockMentalPokerGameRoom.startedRounds.map(settings => settings.participants)).toEqual([
+      ['A', 'B'],
+      ['B', 'A'],
     ]);
   });
 
