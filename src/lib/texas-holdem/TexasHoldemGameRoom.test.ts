@@ -386,6 +386,45 @@ describe('TexasHoldemGameRoom', () => {
     }
   });
 
+  test('returning to the table prevents a stale timeout from auto-folding again', async () => {
+    jest.useFakeTimers();
+    try {
+      const mockGameRoom = new MockGameRoom();
+      mockGameRoom.peerIdDeferred.resolve('A');
+      const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+      mockMentalPokerGameRoom.members = ['A', 'B'];
+      const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+      const startPromise = texasHoldemGameRoom.startNewRound({
+        initialFundAmount: 100,
+        autoFoldTimeoutSeconds: 5,
+      });
+      await Promise.resolve();
+      jest.runOnlyPendingTimers();
+      await startPromise;
+      await Promise.resolve();
+
+      mockGameRoom.listener.emit('event', {
+        type: 'public',
+        sender: 'A',
+        data: {
+          type: 'action/returnToTable',
+          round: 1,
+        },
+      }, 'A', false);
+      await Promise.resolve();
+
+      jest.advanceTimersByTime(5000);
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+
+      expect(mockGameRoom.eventsEmitted.some(event => event.data.type === 'action/autoFold')).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('does not cap the configured auto-fold timeout at 300 seconds', async () => {
     jest.useFakeTimers();
     try {

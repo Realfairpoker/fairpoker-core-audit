@@ -989,6 +989,9 @@ export class TexasHoldemGameRoom {
     }
     if (returnOnlyForNextHand && round) {
       this.sittingOutPlayers.add(who);
+      if (round.currentTurn === who) {
+        this.clearTurnTimer(round);
+      }
       if (round.disconnectedPlayers.has(who) && !round.pausedMissingPlayers.includes(who)) {
         round.pausedMissingPlayers.push(who);
         this.clearTurnTimer(round);
@@ -1291,7 +1294,13 @@ export class TexasHoldemGameRoom {
   }
 
   private canAutoFold(roundData: TexasHoldemRound, target: string, replay: boolean) {
-    if (roundData.result || roundData.currentTurn !== target || roundData.foldPlayers.has(target) || roundData.allInPlayers.has(target)) {
+    if (
+      roundData.result
+      || roundData.currentTurn !== target
+      || roundData.foldPlayers.has(target)
+      || roundData.allInPlayers.has(target)
+      || this.sittingOutPlayers.has(target)
+    ) {
       return false;
     }
     if (replay) {
