@@ -88,6 +88,25 @@ async function requestJson<T>(path: string, body: unknown): Promise<T> {
   return data;
 }
 
+export async function verifyActiveAuthSession(session: AuthSession): Promise<boolean> {
+  const response = await fetch(`${getAuthApiBase()}/auth/me`, {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${session.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+  if (response.ok) {
+    return true;
+  }
+  if (response.status === 401) {
+    return false;
+  }
+  const data = await response.json().catch(() => ({}));
+  throw new Error(data?.error || `Auth session check failed (${response.status}).`);
+}
+
 function saveAuthSession(session: AuthSession) {
   localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
   window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));

@@ -9,9 +9,20 @@ import {
   DEFAULT_PLANNED_ROUNDS,
   DEFAULT_SMALL_BLIND_AMOUNT,
   TexasHoldemGameRoomEvents,
+  HandPauseState,
   TexasHoldemRoundSettings,
+  TexasHoldemTableEvent,
   WinningResult,
 } from "./TexasHoldemGameRoom";
+import {TranscriptSnapshot} from "../fairness/transcript";
+
+export interface TexasHoldemRoundHistoryItem {
+  round: number;
+  players: string[];
+  board: Board;
+  holesPerPlayer?: Map<string, Hole>;
+  winningResult?: WinningResult;
+}
 
 function useMyPlayerId() {
   const [peerId, setPeerId] = useState<string | undefined>(() => TexasHoldem.peerId);
@@ -68,6 +79,9 @@ function useGameSetup() {
   }, []);
 
   const initialSnapshot = TexasHoldem.getStateSnapshot();
+  const [playersByRound, setPlayersByRound] = useState<Map<number, string[]>>(
+    () => new Map(Array.from(initialSnapshot.playersByRound.entries()).map(([round, roundPlayers]) => [round, [...roundPlayers]])),
+  );
   const [currentRound, setCurrentRound] = useState<number | undefined>(() => initialSnapshot.currentRound);
   const [players, setPlayers] = useState<string[] | undefined>(() => {
     const round = initialSnapshot.currentRound;
@@ -78,6 +92,11 @@ function useGameSetup() {
     const newRoundListener = (round: number, players: string[]) => {
       setCurrentRound(round);
       setPlayers(players);
+      setPlayersByRound(prev => {
+        const next = new Map(prev);
+        next.set(round, [...players]);
+        return next;
+      });
     };
     const winnerListener: TexasHoldemGameRoomEvents['winner'] = (result) => {
       setCurrentRound(prev => prev ?? result.round);
@@ -86,6 +105,13 @@ function useGameSetup() {
           return prev;
         }
         const playersFromSnapshot = TexasHoldem.getStateSnapshot().playersByRound.get(result.round);
+        if (playersFromSnapshot) {
+          setPlayersByRound(previous => {
+            const next = new Map(previous);
+            next.set(result.round, [...playersFromSnapshot]);
+            return next;
+          });
+        }
         return playersFromSnapshot ? [...playersFromSnapshot] : prev;
       });
     };
@@ -108,6 +134,7 @@ function useGameSetup() {
     bigBlind,
     button,
     currentRound,
+    playersByRound,
   };
 }
 
@@ -132,12 +159,21 @@ function useBankrolls() {
 
 function useScoreBoard() {
   const [scoreBoard, setScoreBoard] = useState<Map<string, number>>(new Map());
+  const [handScoreBoard, setHandScoreBoard] = useState<Map<string, number>>(new Map());
   const [totalDebt, setTotalDebt] = useState<Map<string, number>>(new Map());
   useEffect(() => {
+    const newRoundListener: TexasHoldemGameRoomEvents['players'] = () => {
+      setHandScoreBoard(new Map());
+    };
     const fundListener: TexasHoldemGameRoomEvents['fund'] = (fund, previousFund, whose, borrowed) => {
       const diff = fund - (previousFund ?? 0);
       if (!borrowed) {
         setScoreBoard(prev => {
+          const next = new Map(prev);
+          next.set(whose, (next.get(whose) ?? 0) + diff);
+          return next;
+        });
+        setHandScoreBoard(prev => {
           const next = new Map(prev);
           next.set(whose, (next.get(whose) ?? 0) + diff);
           return next;
@@ -151,14 +187,17 @@ function useScoreBoard() {
         })
       }
     };
+    TexasHoldem.listener.on('players', newRoundListener);
     TexasHoldem.listener.on('fund', fundListener);
     return () => {
+      TexasHoldem.listener.off('players', newRoundListener);
       TexasHoldem.listener.off('fund', fundListener);
     };
   }, []);
 
   return {
     scoreBoard,
+    handScoreBoard,
     totalDebt,
   };
 }
@@ -204,6 +243,7 @@ function useBoard(round: number | undefined) {
   return {
     board,
     boardStage,
+    boardPerRound,
   };
 }
 
@@ -239,6 +279,7 @@ function useHoles(round: number | undefined, myPlayerId: string | undefined) {
   return {
     myHole,
     holesPerPlayer,
+    holesPerPlayerPerRound,
   }
 }
 
@@ -408,6 +449,7 @@ function useMyBetAmount(round: number | undefined, myPlayerId: string | undefine
 
 function useShowdownAndWinner(round: number | undefined) {
   const initialWinners = TexasHoldem.getStateSnapshot().winnersByRound;
+  const [winnersByRound, setWinnersByRound] = useState<Map<number, WinningResult>>(() => new Map(initialWinners));
   const [lastWinningResult, setLastWinningResult] = useState<WinningResult | undefined>(() => {
     if (!initialWinners.size) {
       return undefined;
@@ -420,6 +462,11 @@ function useShowdownAndWinner(round: number | undefined) {
   useEffect(() => {
     const winnerListener = (result: WinningResult) => {
       setLastWinningResult(result);
+      setWinnersByRound(prev => {
+        const next = new Map(prev);
+        next.set(result.round, result);
+        return next;
+      });
       setFinishedPerRound(prev => {
         const next = new Map(prev);
         next.set(result.round, true);
@@ -436,7 +483,27 @@ function useShowdownAndWinner(round: number | undefined) {
   return {
     lastWinningResult,
     currentRoundFinished,
+    winnersByRound,
   };
+}
+
+function useTranscript() {
+  const [transcript, setTranscript] = useState<TranscriptSnapshot<TexasHoldemTableEvent> | null>(
+    () => TexasHoldem.getTranscript?.() ?? null,
+  );
+
+  useEffect(() => {
+    const transcriptListener = () => {
+      setTranscript(TexasHoldem.getTranscript?.() ?? null);
+    };
+    TexasHoldem.listener.on('transcript', transcriptListener);
+    transcriptListener();
+    return () => {
+      TexasHoldem.listener.off('transcript', transcriptListener);
+    };
+  }, []);
+
+  return transcript;
 }
 
 function useRoundSettings(round: number | undefined) {
@@ -457,6 +524,31 @@ function useRoundSettings(round: number | undefined) {
   }, []);
 
   return useMemo(() => round ? settingsPerRound.get(round) : undefined, [round, settingsPerRound]);
+}
+
+function useHandPause(round: number | undefined) {
+  const [pauseByRound, setPauseByRound] = useState<Map<number, HandPauseState>>(
+    () => TexasHoldem.getStateSnapshot().handPauseByRound,
+  );
+  useEffect(() => {
+    const pauseListener: TexasHoldemGameRoomEvents['handPause'] = (state) => {
+      setPauseByRound(prev => {
+        const next = new Map(prev);
+        if (state) {
+          next.set(state.round, state);
+        } else if (round) {
+          next.delete(round);
+        }
+        return next;
+      });
+    };
+    TexasHoldem.listener.on('handPause', pauseListener);
+    return () => {
+      TexasHoldem.listener.off('handPause', pauseListener);
+    };
+  }, [round]);
+
+  return useMemo(() => round ? pauseByRound.get(round) ?? null : null, [pauseByRound, round]);
 }
 
 function getSeriesProgress(round: number | undefined, settings: TexasHoldemRoundSettings | undefined) {
@@ -480,22 +572,26 @@ export default function useTexasHoldem() {
     bigBlind,
     button,
     currentRound,
+    playersByRound,
   } = useGameSetup();
 
   const bankrolls = useBankrolls();
 
   const {
     scoreBoard,
+    handScoreBoard,
     totalDebt,
   } = useScoreBoard();
 
   const {
     board,
+    boardPerRound,
   } = useBoard(currentRound);
 
   const {
     myHole,
     holesPerPlayer,
+    holesPerPlayerPerRound,
   } = useHoles(currentRound, myPlayerId);
 
   const whoseTurnAndCallAmount = useWhoseTurnAndCallAmount(currentRound);
@@ -514,18 +610,21 @@ export default function useTexasHoldem() {
     await TexasHoldem.fold(currentRound);
   }, [currentRound]);
 
-  const sitOut = useCallback(async () => {
-    if (!currentRound) {
-      return;
-    }
-    await TexasHoldem.sitOut(currentRound);
+  const sitOut = useCallback(async (roundOverride?: number | null) => {
+    const targetRound = roundOverride !== undefined
+      ? roundOverride
+      : currentRound ?? TexasHoldem.getStateSnapshot().currentRound ?? null;
+    await TexasHoldem.sitOut(targetRound);
   }, [currentRound]);
 
-  const returnToTable = useCallback(async () => {
-    if (!currentRound) {
-      return;
-    }
-    await TexasHoldem.returnToTable(currentRound);
+  const returnToTable = useCallback(async (roundOverride?: number | null) => {
+    const targetRound = roundOverride !== undefined
+      ? roundOverride
+      : currentRound ?? TexasHoldem.getStateSnapshot().currentRound;
+    await TexasHoldem.returnToTable(targetRound);
+  }, [currentRound]);
+  const openRegistration = useCallback(async () => {
+    await TexasHoldem.openRegistration(currentRound ?? TexasHoldem.getStateSnapshot().currentRound ?? null);
   }, [currentRound]);
 
   const actionsDone = useActionsDone(currentRound);
@@ -533,6 +632,7 @@ export default function useTexasHoldem() {
   const potAmount = usePotAmount();
   const myBetAmount = useMyBetAmount(currentRound, myPlayerId);
   const roundSettings = useRoundSettings(currentRound);
+  const handPause = useHandPause(currentRound);
 
   const startNewRound = useCallback(async (settings?: Partial<TexasHoldemRoundSettings>) => {
     await TexasHoldem.startNewRound({
@@ -543,13 +643,46 @@ export default function useTexasHoldem() {
       autoFoldTimeoutSeconds: settings?.autoFoldTimeoutSeconds ?? DEFAULT_AUTO_FOLD_TIMEOUT_SECONDS,
       plannedRounds: settings?.plannedRounds ?? DEFAULT_PLANNED_ROUNDS,
       seriesStartRound: settings?.seriesStartRound,
+      participants: settings?.participants,
     });
   }, []);
+  const canStartNewRound = useCallback(() => TexasHoldem.canStartNewRound(), []);
+  const voteToVoidHand = useCallback(async (approve: boolean) => {
+    if (!currentRound) {
+      return;
+    }
+    await TexasHoldem.voteToVoidHand(currentRound, approve);
+  }, [currentRound]);
 
   const {
     lastWinningResult,
     currentRoundFinished,
+    winnersByRound,
   } = useShowdownAndWinner(currentRound);
+
+  const transcript = useTranscript();
+
+  const roundHistory = useMemo<TexasHoldemRoundHistoryItem[]>(() => {
+    const rounds = new Set<number>([
+      ...Array.from(playersByRound.keys()),
+      ...Array.from(boardPerRound.keys()),
+      ...Array.from(holesPerPlayerPerRound.keys()),
+      ...Array.from(winnersByRound.keys()),
+    ]);
+    if (currentRound) {
+      rounds.add(currentRound);
+    }
+
+    return Array.from(rounds)
+      .sort((a, b) => a - b)
+      .map(roundNumber => ({
+        round: roundNumber,
+        players: playersByRound.get(roundNumber) ?? [],
+        board: boardPerRound.get(roundNumber) ?? [],
+        holesPerPlayer: holesPerPlayerPerRound.get(roundNumber),
+        winningResult: winnersByRound.get(roundNumber),
+      }));
+  }, [boardPerRound, currentRound, holesPerPlayerPerRound, playersByRound, winnersByRound]);
 
   const seriesProgress = useMemo(
     () => getSeriesProgress(currentRound, roundSettings),
@@ -574,17 +707,24 @@ export default function useTexasHoldem() {
     startGame: startNewRound,
     bankrolls,
     scoreBoard,
+    handScoreBoard,
     totalDebt,
     myBetAmount,
     lastWinningResult,
+    roundHistory,
+    transcript,
     actionsDone,
     roundSettings,
+    handPause,
     seriesProgress,
+    canStartGame: canStartNewRound,
     actions: {
       fireBet,
       fireFold,
       sitOut,
       returnToTable,
+      openRegistration,
+      voteToVoidHand,
     },
   };
 }

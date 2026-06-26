@@ -7,6 +7,7 @@ import {
   EncodedDeck,
   encodeStandardCard,
   getStandard52Deck,
+  isEncodedStandardCard,
   Player,
   PublicKey,
   StandardCard
@@ -283,22 +284,22 @@ export default class MentalPokerGameRoom {
     this.propagate('connected');
     this.propagate('members');
 
-    this.gameRoom.listener.on('event', this.lcm.register(({ data }, _who, replay) => {
+    this.gameRoom.listener.on('event', this.lcm.register(({ data }, who, replay) => {
       switch (data.type) {
         case 'start':
           this.handleRoundStartEvent(data, !!replay);
           break;
         case 'deck/shuffle':
-          this.handleDeckShuffleEvent(data, !!replay);
+          this.handleDeckShuffleEvent(data, !!replay, who);
           break;
         case 'deck/lock':
-          this.handleDeckLockEvent(data, !!replay);
+          this.handleDeckLockEvent(data, !!replay, who);
           break;
         case 'deck/finalized':
-          this.handleDeckFinalizedEvent(data);
+          this.handleDeckFinalizedEvent(data, who);
           break;
         case 'card/decrypt':
-          this.handleCardDecrypted(data);
+          this.handleCardDecrypted(data, who);
           break;
       }
     }, listener => this.gameRoom.listener.off('event', listener)));
@@ -357,10 +358,17 @@ export default class MentalPokerGameRoom {
             (encryptedCard, key) => key.decrypt(encryptedCard),
             deck.cards[offset],
           );
-          const card = decodeStandardCard(Number(fullyDecrypted));
+          const encodedCard = Number(fullyDecrypted);
+          if (!isEncodedStandardCard(encodedCard)) {
+            console.warn(`Ignoring invalid decrypted card for round ${round}, offset ${offset}.`);
+            return;
+          }
+          const card = decodeStandardCard(encodedCard);
           storeRevealedBoardCard(this.storageScope, round, offset, card);
           console.log(`The card [${offset}] has been decrypted: ${card.suit} ${card.rank}`);
           this.emitter.emit('card', round, offset, card);
+        }).catch(err => {
+          console.warn(`Unable to decrypt card for round ${round}, offset ${offset}.`, err);
         });
       });
     });
@@ -452,7 +460,7 @@ export default class MentalPokerGameRoom {
           decryptionKey: dk,
         };
         if (recipient === myPeerId) {
-          await this.handleCardDecrypted(event);
+          await this.handleCardDecrypted(event, participant);
         }
         console.debug(`Dealing the card [ ${cardOffset} ] to ${recipient}.`);
         await this.firePrivateEvent(event, recipient);
@@ -548,7 +556,18 @@ export default class MentalPokerGameRoom {
     return player;
   }
 
-  private async handleDeckShuffleEvent(e: DeckShuffleEvent, replay: boolean) {
+  private senderMatchesEventPlayer(sender: string | undefined, e: {type: string; round: number; player: string}) {
+    if (!sender || sender === e.player) {
+      return true;
+    }
+    console.warn(`Ignoring ${e.type} event for round ${e.round}: sender ${sender} cannot act as ${e.player}.`);
+    return false;
+  }
+
+  private async handleDeckShuffleEvent(e: DeckShuffleEvent, replay: boolean, sender?: string) {
+    if (!this.senderMatchesEventPlayer(sender, e)) {
+      return;
+    }
     if (replay) return;
     const roundData = this.getOrCreateDataForRound(e.round);
     const settings = await roundData.mentalPokerSettings.promise;
@@ -603,7 +622,10 @@ export default class MentalPokerGameRoom {
     }
   }
 
-  private async handleDeckLockEvent(e: DeckLockEvent, replay: boolean) {
+  private async handleDeckLockEvent(e: DeckLockEvent, replay: boolean, sender?: string) {
+    if (!this.senderMatchesEventPlayer(sender, e)) {
+      return;
+    }
     if (replay) return;
     const roundData = this.getOrCreateDataForRound(e.round);
     const settings = await roundData.mentalPokerSettings.promise;
@@ -648,12 +670,22 @@ export default class MentalPokerGameRoom {
     }
   }
 
-  private async handleDeckFinalizedEvent(e: DeckFinalizedEvent) {
+  private async handleDeckFinalizedEvent(e: DeckFinalizedEvent, sender?: string) {
+    if (!this.senderMatchesEventPlayer(sender, e)) {
+      return;
+    }
     const roundData = this.getOrCreateDataForRound(e.round);
+    const settings = await roundData.mentalPokerSettings.promise;
+    const participants = getParticipants(settings);
+    const expectedPlayer = participants[participants.length - 1];
+    if (!expectedPlayer || e.player !== expectedPlayer) {
+      console.warn(`Ignoring out-of-order deck finalization event for round ${e.round}.`);
+      return;
+    }
     roundData.deck.resolve(toBigIntEncodedDeck(e.deck));
   }
 
-  private async handleCardDecrypted(e: DecryptCardEvent) {
+  private async handleCardDecrypted(e: DecryptCardEvent, sender?: string) {
     const roundData = this.getOrCreateDataForRound(e.round);
     const dk = new DecryptionKey(BigInt(e.decryptionKey.d), BigInt(e.decryptionKey.n));
     let participant = e.player;
@@ -662,6 +694,10 @@ export default class MentalPokerGameRoom {
       participant = e.aliceOrBob === 'alice' ? settings.alice : settings.bob;
     }
     if (participant) {
+      if (sender && sender !== participant) {
+        console.warn(`Ignoring card/decrypt event for round ${e.round}, card ${e.cardOffset}: sender ${sender} cannot provide ${participant}'s key.`);
+        return;
+      }
       roundData.cardKeyDeferred(e.cardOffset, participant).resolve(dk);
     }
   }

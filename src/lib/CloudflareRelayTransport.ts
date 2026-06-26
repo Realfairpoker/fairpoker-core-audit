@@ -1,5 +1,4 @@
 import type {
-  Transport,
   TransportEventName,
   TransportEvents,
 } from 'dandelion-mesh';
@@ -13,6 +12,8 @@ type RelayTransportOptions = {
 
 export type RelayPeerProfile = {
   peerId: string;
+  accountId?: string | null;
+  accountUsername?: string | null;
   connectedAt: number;
   source: string;
   browser: string;
@@ -31,12 +32,58 @@ export type RelayPeerProfile = {
 };
 
 type RelayServerMessage =
-  | { type: 'welcome'; roomId: string; peerId: string; peers: string[]; profile?: RelayPeerProfile; profiles?: RelayPeerProfile[]; roomRisk?: unknown }
+  | { type: 'welcome'; roomId: string; peerId: string; peers: string[]; profile?: RelayPeerProfile; profiles?: RelayPeerProfile[]; relay?: RelaySummary; roomRisk?: unknown; roomState?: WorkerRoomState; capabilities?: RelayCapabilities }
   | { type: 'peerJoined'; peerId: string; profile?: RelayPeerProfile; roomRisk?: unknown }
   | { type: 'peerLeft'; peerId: string }
   | { type: 'riskUpdate'; roomRisk?: unknown }
-  | { type: 'message'; from: string; data: unknown }
+  | { type: 'roomState'; roomState?: WorkerRoomState }
+  | { type: 'message'; from: string; seq?: number; replay?: boolean; data: unknown }
   | { type: 'error'; message: string };
+
+type RelaySummary = {
+  latestSeq: number;
+  retainedFromSeq: number;
+  retainedCount: number;
+  maxRetainedCount: number;
+};
+
+type RelayCapabilities = {
+  publicSelfEcho?: boolean;
+  orderedEventLog?: boolean;
+};
+
+export type WorkerPlayerStatus = 'active' | 'watching' | 'sittingOut' | 'timedOut' | 'offline';
+
+export type WorkerRoomPlayerState = {
+  peerId: string;
+  online: boolean;
+  connected: boolean;
+  seated: boolean;
+  spectator?: boolean;
+  status: WorkerPlayerStatus;
+  timedOut?: boolean;
+  sittingOut?: boolean;
+};
+
+export type WorkerRoomState = {
+  version: number;
+  source: 'cloudflare-worker';
+  roomId: string;
+  generatedAt: number;
+  viewerPeerId?: string;
+  latestEventSeq: number;
+  currentRound: number | null;
+  currentPlayers: string[];
+  currentTurn: string | null;
+  players: WorkerRoomPlayerState[];
+  spectators?: WorkerRoomPlayerState[];
+  activePlayerCount: number;
+  spectatorCount?: number;
+  onlineCount: number;
+  roomValid: boolean;
+  playable: boolean;
+  reason: string;
+};
 
 function bucketNumber(value: number, step: number) {
   if (!Number.isFinite(value) || value <= 0) {
@@ -75,6 +122,37 @@ function appendClientHints(url: URL) {
   url.searchParams.set('hw', `${navigator.hardwareConcurrency || 'unknown'}c-${navigatorLike.deviceMemory || 'unknown'}m`);
 }
 
+function writeLastRelaySeq(roomId: string, peerId: string, seq: number) {
+  if (typeof window === 'undefined' || !Number.isSafeInteger(seq) || seq <= 0) {
+    return;
+  }
+  const previous = readStoredRelaySeq(roomId, peerId);
+  if (seq <= previous) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(relaySeqStorageKey(roomId, peerId), String(seq));
+  } catch {
+    // Reconnect replay is an optimization; storage-denied browsers can still play live.
+  }
+}
+
+function relaySeqStorageKey(roomId: string, peerId: string) {
+  return `fairpoker:relay:${roomId}:${peerId}:lastSeq`;
+}
+
+function readStoredRelaySeq(roomId: string, peerId: string) {
+  if (typeof window === 'undefined') {
+    return 0;
+  }
+  try {
+    const value = Number(window.localStorage.getItem(relaySeqStorageKey(roomId, peerId)) || 0);
+    return Number.isSafeInteger(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function buildWebSocketUrl(serverUrl: string, roomId: string, peerId: string, authToken?: string) {
   const url = new URL(serverUrl);
   if (url.protocol === 'https:') {
@@ -89,6 +167,7 @@ function buildWebSocketUrl(serverUrl: string, roomId: string, peerId: string, au
   if (authToken) {
     url.searchParams.set('token', authToken);
   }
+  url.searchParams.set('sinceSeq', '0');
   appendClientHints(url);
   return url.toString();
 }
@@ -111,9 +190,36 @@ function publishRoomRisk(roomRisk: unknown) {
   }));
 }
 
-export default class CloudflareRelayTransport implements Transport {
+function publishRelaySummary(relay: RelaySummary | undefined) {
+  if (typeof window === 'undefined' || !relay) {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('fairpoker:relay-summary', {
+    detail: { relay },
+  }));
+}
+
+function publishRoomState(roomState: WorkerRoomState | undefined) {
+  if (typeof window === 'undefined' || !roomState) {
+    return;
+  }
+  const fairPokerWindow = window as Window & {
+    __fairPokerLatestRoomStates?: Map<string, WorkerRoomState>;
+  };
+  if (!fairPokerWindow.__fairPokerLatestRoomStates) {
+    fairPokerWindow.__fairPokerLatestRoomStates = new Map();
+  }
+  fairPokerWindow.__fairPokerLatestRoomStates.set(roomState.roomId, roomState);
+  window.dispatchEvent(new CustomEvent('fairpoker:room-state', {
+    detail: { roomState },
+  }));
+}
+
+export default class CloudflareRelayTransport {
   private readonly socket: WebSocket;
   private readonly peerId: string;
+  private readonly roomId: string;
+  private capabilities: RelayCapabilities = {};
   private readonly connected = new Set<string>();
   private readonly listeners: {
     [K in TransportEventName]: Set<TransportEvents[K]>;
@@ -130,6 +236,7 @@ export default class CloudflareRelayTransport implements Transport {
 
   constructor(options: RelayTransportOptions) {
     this.peerId = options.peerId;
+    this.roomId = options.roomId;
     this.socket = new WebSocket(buildWebSocketUrl(
       options.serverUrl,
       options.roomId,
@@ -137,9 +244,7 @@ export default class CloudflareRelayTransport implements Transport {
       options.authToken,
     ));
 
-    this.socket.addEventListener('message', (event) => {
-      this.handleServerMessage(event.data);
-    });
+    this.socket.addEventListener('message', (event) => this.handleServerMessage(event.data));
     this.socket.addEventListener('error', () => {
       this.emit('error', new Error('Cloudflare relay WebSocket error.'));
     });
@@ -165,7 +270,7 @@ export default class CloudflareRelayTransport implements Transport {
   }
 
   async send(remotePeerId: string, data: unknown) {
-    this.sendControl({
+    return this.sendControl({
       type: 'send',
       to: remotePeerId,
       data,
@@ -173,7 +278,7 @@ export default class CloudflareRelayTransport implements Transport {
   }
 
   async broadcast(data: unknown) {
-    this.sendControl({
+    return this.sendControl({
       type: 'broadcast',
       data,
     });
@@ -191,6 +296,10 @@ export default class CloudflareRelayTransport implements Transport {
     this.socket.close();
   }
 
+  get publicSelfEcho() {
+    return Boolean(this.capabilities.publicSelfEcho);
+  }
+
   private handleServerMessage(raw: unknown) {
     let message: RelayServerMessage;
     try {
@@ -202,6 +311,9 @@ export default class CloudflareRelayTransport implements Transport {
 
     if (message.type === 'welcome') {
       this._localPeerId = message.peerId;
+      this.capabilities = message.capabilities ?? {};
+      publishRelaySummary(message.relay);
+      publishRoomState(message.roomState);
       publishProfiles([
         ...(message.profile ? [message.profile] : []),
         ...(message.profiles ?? []),
@@ -243,24 +355,59 @@ export default class CloudflareRelayTransport implements Transport {
       return;
     }
 
+    if (message.type === 'roomState') {
+      publishRoomState(message.roomState);
+      return;
+    }
+
     if (message.type === 'message') {
+      if (message.seq) {
+        writeLastRelaySeq(this.roomId, this.peerId, message.seq);
+      }
       if (message.from !== this.peerId) {
         this.connected.add(message.from);
-        this.emit('message', message.from, message.data);
       }
+      this.emitTransportMessage(message.from, message.data, Boolean(message.replay));
       return;
     }
 
     this.emit('error', new Error(message.message));
   }
 
-  private sendControl(message: unknown) {
+  private sendControl(message: unknown): Promise<boolean> {
     const encoded = JSON.stringify(message);
     if (this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(encoded);
-      return;
+      return Promise.resolve(true);
     }
-    this.socket.addEventListener('open', () => this.socket.send(encoded), { once: true });
+    if (this.socket.readyState !== WebSocket.CONNECTING) {
+      return Promise.resolve(false);
+    }
+    return new Promise(resolve => {
+      const cleanup = () => {
+        window.clearTimeout(timer);
+        this.socket.removeEventListener('open', onOpen);
+        this.socket.removeEventListener('close', onClosed);
+        this.socket.removeEventListener('error', onClosed);
+      };
+      const onOpen = () => {
+        cleanup();
+        try {
+          this.socket.send(encoded);
+          resolve(true);
+        } catch {
+          resolve(false);
+        }
+      };
+      const onClosed = () => {
+        cleanup();
+        resolve(false);
+      };
+      const timer = window.setTimeout(onClosed, 1500);
+      this.socket.addEventListener('open', onOpen, { once: true });
+      this.socket.addEventListener('close', onClosed, { once: true });
+      this.socket.addEventListener('error', onClosed, { once: true });
+    });
   }
 
   private emit<E extends TransportEventName>(
@@ -269,6 +416,12 @@ export default class CloudflareRelayTransport implements Transport {
   ) {
     for (const listener of Array.from(this.listeners[event])) {
       (listener as (...args: Parameters<TransportEvents[E]>) => void)(...args);
+    }
+  }
+
+  private emitTransportMessage(from: string, data: unknown, replay: boolean) {
+    for (const listener of Array.from(this.listeners.message)) {
+      (listener as (from: string, data: unknown, replay?: boolean) => void)(from, data, replay);
     }
   }
 }

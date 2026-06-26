@@ -163,6 +163,64 @@ describe('TexasHoldemGameRoom', () => {
     ]);
   });
 
+  test('public board cards are not shown just because their values are known early', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+    const boardEvents: Array<{round: number; count: number}> = [];
+    texasHoldemGameRoom.listener.on('board', (round, board) => {
+      boardEvents.push({round, count: board.length});
+    });
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+
+    [
+      {suit: 'Spade', rank: '7'},
+      {suit: 'Spade', rank: 'A'},
+      {suit: 'Club', rank: '5'},
+      {suit: 'Spade', rank: '6'},
+      {suit: 'Heart', rank: 'K'},
+    ].forEach((card, offset) => {
+      mockMentalPokerGameRoom.listener.emit('card', 1, offset, card as any);
+    });
+    await Promise.resolve();
+
+    expect(boardEvents).toEqual([]);
+
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'A',
+      data: {
+        type: 'action/bet',
+        round: 1,
+        amount: 1,
+      },
+    }, 'A', false);
+    await new Promise(r => setTimeout(r, 0));
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'B',
+      data: {
+        type: 'action/bet',
+        round: 1,
+        amount: 0,
+      },
+    }, 'B', false);
+
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(boardEvents).toEqual([{round: 1, count: 3}]);
+    expect(mockMentalPokerGameRoom.shownCards).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 2],
+    ]);
+  });
+
   test('next round rotation uses the previous canonical player order', async () => {
     const mockGameRoom = new MockGameRoom();
     mockGameRoom.peerIdDeferred.resolve('B');
@@ -193,6 +251,26 @@ describe('TexasHoldemGameRoom', () => {
       ['A', 'B'],
       ['B', 'A'],
     ]);
+  });
+
+  test('next round can use the worker-provided seated player list', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['C', 'A', 'B'];
+
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+      participants: ['A', 'B'],
+    });
+
+    expect(mockMentalPokerGameRoom.startedRounds[0].participants).toEqual(['A', 'B']);
+    expect(mockGameRoom.lastEventEmitted.data).toEqual(expect.objectContaining({
+      type: 'newRound',
+      players: ['A', 'B'],
+    }));
   });
 
   test('auto-folds the current player after the configured timeout', async () => {
@@ -234,57 +312,139 @@ describe('TexasHoldemGameRoom', () => {
     }
   });
 
-  test('auto-folds the disconnected current player immediately', async () => {
-    const mockGameRoom = new MockGameRoom();
-    mockGameRoom.peerIdDeferred.resolve('A');
-    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
-    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
-    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
-    const foldEvents: Array<[number, string]> = [];
-    texasHoldemGameRoom.listener.on('fold', (round, who) => {
-      foldEvents.push([round, who]);
-    });
-    const currentTurnPromise = new Promise<string | null>(resolve => {
-      texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
-        if (who === 'C') {
-          resolve(who);
-        }
+  test('pauses instead of auto-folding a disconnected current player', async () => {
+    jest.useFakeTimers();
+    try {
+      const mockGameRoom = new MockGameRoom();
+      mockGameRoom.peerIdDeferred.resolve('A');
+      const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+      mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+      const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+      const foldEvents: Array<[number, string]> = [];
+      texasHoldemGameRoom.listener.on('fold', (round, who) => {
+        foldEvents.push([round, who]);
       });
-    });
+      const pauseEvents: any[] = [];
+      texasHoldemGameRoom.listener.on('handPause', state => {
+        pauseEvents.push(state);
+      });
+      const currentTurnPromise = new Promise<string | null>(resolve => {
+        texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
+          if (who === 'C') {
+            resolve(who);
+          }
+        });
+      });
 
-    await texasHoldemGameRoom.startNewRound({
-      initialFundAmount: 100,
-      autoFoldTimeoutSeconds: 60,
-    });
-    await expect(currentTurnPromise).resolves.toBe('C');
-
-    mockMentalPokerGameRoom.members = ['A', 'B'];
-    mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
-    for (let i = 0; i < 6; i += 1) {
+      const startPromise = texasHoldemGameRoom.startNewRound({
+        initialFundAmount: 100,
+        autoFoldTimeoutSeconds: 60,
+      });
       await Promise.resolve();
-    }
+      jest.runOnlyPendingTimers();
+      await startPromise;
+      await expect(currentTurnPromise).resolves.toBe('C');
 
-    expect(mockGameRoom.lastEventEmitted.data).toEqual({
-      type: 'action/autoFold',
-      round: 1,
-      target: 'C',
-    });
-    expect(foldEvents).toEqual([[1, 'C']]);
+      mockMentalPokerGameRoom.members = ['A', 'B'];
+      mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+      expect(foldEvents).toEqual([]);
+      expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
+        round: 1,
+        missingPlayers: ['C'],
+        voters: ['A', 'B'],
+      });
+
+      jest.advanceTimersByTime(60000);
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+
+      expect(mockGameRoom.lastEventEmitted.data.type).toBe('newRound');
+      expect(foldEvents).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  test('auto-folds a disconnected player immediately when their later turn arrives', async () => {
+  test('pauses instead of auto-folding a disconnected later turn', async () => {
+    jest.useFakeTimers();
+    try {
+      const mockGameRoom = new MockGameRoom();
+      mockGameRoom.peerIdDeferred.resolve('A');
+      const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+      mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+      const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+      const foldEvents: Array<[number, string]> = [];
+      texasHoldemGameRoom.listener.on('fold', (round, who) => {
+        foldEvents.push([round, who]);
+      });
+      const pauseEvents: any[] = [];
+      texasHoldemGameRoom.listener.on('handPause', state => {
+        pauseEvents.push(state);
+      });
+      const firstTurnPromise = new Promise<string | null>(resolve => {
+        texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
+          if (who === 'C') {
+            resolve(who);
+          }
+        });
+      });
+
+      const startPromise = texasHoldemGameRoom.startNewRound({
+        initialFundAmount: 100,
+        autoFoldTimeoutSeconds: 60,
+      });
+      await Promise.resolve();
+      jest.runOnlyPendingTimers();
+      await startPromise;
+      await expect(firstTurnPromise).resolves.toBe('C');
+
+      mockMentalPokerGameRoom.members = ['B', 'C'];
+      mockMentalPokerGameRoom.listener.emit('members', ['B', 'C']);
+      mockGameRoom.listener.emit('event', {
+        type: 'public',
+        sender: 'C',
+        data: {
+          type: 'action/bet',
+          round: 1,
+          amount: 2,
+        },
+      }, 'C', false);
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+      expect(foldEvents).not.toContainEqual([1, 'A']);
+      expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
+        round: 1,
+        missingPlayers: ['A'],
+        voters: ['B', 'C'],
+      });
+
+      jest.advanceTimersByTime(60000);
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+
+      expect(mockGameRoom.lastEventEmitted.data.type).toBe('newRound');
+      expect(foldEvents).not.toContainEqual([1, 'A']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('returning missing player resends pending board keys after pause', async () => {
     const mockGameRoom = new MockGameRoom();
     mockGameRoom.peerIdDeferred.resolve('A');
     const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
-    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    mockMentalPokerGameRoom.members = ['A', 'B'];
     const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
-    const foldEvents: Array<[number, string]> = [];
-    texasHoldemGameRoom.listener.on('fold', (round, who) => {
-      foldEvents.push([round, who]);
-    });
-    const firstTurnPromise = new Promise<string | null>(resolve => {
+
+    const currentTurnPromise = new Promise<string | null>(resolve => {
       texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
-        if (who === 'C') {
+        if (who === 'A') {
           resolve(who);
         }
       });
@@ -294,35 +454,85 @@ describe('TexasHoldemGameRoom', () => {
       initialFundAmount: 100,
       autoFoldTimeoutSeconds: 60,
     });
-    await expect(firstTurnPromise).resolves.toBe('C');
+    await currentTurnPromise;
 
-    mockMentalPokerGameRoom.members = ['B', 'C'];
-    mockMentalPokerGameRoom.listener.emit('members', ['B', 'C']);
-
-    const autoFoldHandled = new Promise<void>(resolve => {
-      texasHoldemGameRoom.listener.on('fold', (_round, who) => {
-        if (who === 'A') {
-          resolve();
-        }
-      });
-    });
+    await texasHoldemGameRoom.bet(1, 1);
     mockGameRoom.listener.emit('event', {
       type: 'public',
-      sender: 'C',
+      sender: 'B',
       data: {
         type: 'action/bet',
         round: 1,
-        amount: 2,
+        amount: 0,
       },
-    }, 'C', false);
-    await autoFoldHandled;
+    }, 'B', false);
+    await new Promise(r => setTimeout(r, 0));
 
-    expect(mockGameRoom.lastEventEmitted.data).toEqual({
-      type: 'action/autoFold',
-      round: 1,
-      target: 'A',
+    expect(mockMentalPokerGameRoom.shownCards).toEqual(
+      expect.arrayContaining([[1, 0], [1, 1], [1, 2]])
+    );
+    mockMentalPokerGameRoom.shownCards = [];
+
+    mockMentalPokerGameRoom.members = ['B'];
+    mockMentalPokerGameRoom.listener.emit('members', ['B']);
+    await new Promise(r => setTimeout(r, 0));
+
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+    mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mockMentalPokerGameRoom.shownCards).toEqual(
+      expect.arrayContaining([[1, 0], [1, 1], [1, 2]])
+    );
+  });
+
+  test('return to table resends pending board keys even without an active pause', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    const currentTurnPromise = new Promise<string | null>(resolve => {
+      texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
+        if (who === 'A') {
+          resolve(who);
+        }
+      });
     });
-    expect(foldEvents).toContainEqual([1, 'A']);
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+      autoFoldTimeoutSeconds: 60,
+    });
+    await currentTurnPromise;
+
+    await texasHoldemGameRoom.bet(1, 1);
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'B',
+      data: {
+        type: 'action/bet',
+        round: 1,
+        amount: 0,
+      },
+    }, 'B', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    mockMentalPokerGameRoom.shownCards = [];
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'A',
+      data: {
+        type: 'action/returnToTable',
+        round: 1,
+      },
+    }, 'A', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mockMentalPokerGameRoom.shownCards).toEqual(
+      expect.arrayContaining([[1, 0], [1, 1], [1, 2]])
+    );
   });
 
   test('replayed current turn restarts auto-fold after reconnect', async () => {
@@ -592,6 +802,238 @@ describe('TexasHoldemGameRoom', () => {
       initialFundAmount: 100,
     });
     await expect(secondPlayersPromise).resolves.toEqual(['B', 'C', 'A']);
+  });
+
+  test('local folded player reveals recovery keys for board and active players', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('C');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    const firstTurnPromise = new Promise<string | null>(resolve => {
+      texasHoldemGameRoom.listener.on('whoseTurn', (_round, who) => {
+        if (who === 'C') {
+          resolve(who);
+        }
+      });
+    });
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await expect(firstTurnPromise).resolves.toBe('C');
+
+    await texasHoldemGameRoom.fold(1);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mockMentalPokerGameRoom.shownCards).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 2],
+      [1, 3],
+      [1, 4],
+      [1, 5],
+      [1, 6],
+      [1, 7],
+      [1, 8],
+    ]);
+  });
+
+  test('return to table resends recovery keys when the local player already folded', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('C');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'A',
+      data: {
+        type: 'newRound',
+        round: 1,
+        players: ['A', 'B', 'C'],
+        settings: {
+          initialFundAmount: 100,
+        },
+      },
+    }, 'A', true);
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'A',
+      data: {
+        type: 'action/autoFold',
+        round: 1,
+        target: 'C',
+      },
+    }, 'A', true);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mockMentalPokerGameRoom.shownCards).toEqual([]);
+
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'C',
+      data: {
+        type: 'action/returnToTable',
+        round: 1,
+      },
+    }, 'C', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mockMentalPokerGameRoom.shownCards).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 2],
+      [1, 3],
+      [1, 4],
+      [1, 5],
+      [1, 6],
+      [1, 7],
+      [1, 8],
+    ]);
+  });
+
+  test('missing player pauses the hand and requires unanimous void approval', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    const pauseEvents: any[] = [];
+    const winnerEvents: WinningResult[] = [];
+    const fundEvents: Array<[number, number | undefined, string, boolean | undefined]> = [];
+    texasHoldemGameRoom.listener.on('handPause', state => pauseEvents.push(state));
+    texasHoldemGameRoom.listener.on('winner', result => winnerEvents.push(result));
+    texasHoldemGameRoom.listener.on('fund', (fund, previousFund, whose, borrowed) => {
+      fundEvents.push([fund, previousFund, whose, borrowed]);
+    });
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+    mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
+      round: 1,
+      missingPlayers: ['C'],
+      voters: ['A', 'B'],
+      approvals: [],
+      rejections: [],
+    });
+
+    await texasHoldemGameRoom.voteToVoidHand(1, false);
+    await new Promise(r => setTimeout(r, 0));
+    expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
+      approvals: [],
+      rejections: ['A'],
+    });
+    expect(winnerEvents).toEqual([]);
+
+    await texasHoldemGameRoom.voteToVoidHand(1, true);
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'B',
+      data: {
+        type: 'action/voidHandVote',
+        round: 1,
+        approve: true,
+      },
+    }, 'B', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(winnerEvents).toEqual([{
+      how: 'Voided',
+      round: 1,
+      missingPlayers: ['C'],
+      approvals: ['A', 'B'],
+    }]);
+    expect(fundEvents.filter(([, , player]) => player === 'A').pop()?.[0]).toBe(100);
+    expect(fundEvents.filter(([, , player]) => player === 'B').pop()?.[0]).toBe(100);
+  });
+
+  test('returning player clears hand pause even before member list catches up', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    const pauseEvents: any[] = [];
+    const turnEvents: Array<[number, string | null, {callAmount: number} | undefined]> = [];
+    texasHoldemGameRoom.listener.on('handPause', state => pauseEvents.push(state));
+    texasHoldemGameRoom.listener.on('whoseTurn', (round, whose, meta) => {
+      turnEvents.push([round, whose, meta]);
+    });
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await new Promise(r => setTimeout(r, 0));
+
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+    mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
+      round: 1,
+      missingPlayers: ['C'],
+    });
+
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'C',
+      data: {
+        type: 'action/returnToTable',
+        round: 1,
+      },
+    }, 'C', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(pauseEvents[pauseEvents.length - 1]).toBeNull();
+    expect(turnEvents[turnEvents.length - 1]).toEqual([1, 'C', {callAmount: 2}]);
+  });
+
+  test('returning player receives current hand keys again', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
+
+    await texasHoldemGameRoom.startNewRound({
+      initialFundAmount: 100,
+    });
+    await new Promise(r => setTimeout(r, 0));
+
+    const roundData = (texasHoldemGameRoom as any).dataByRounds.get(1);
+    await (texasHoldemGameRoom as any).revealBoardCards(1, roundData, 3, false);
+    mockMentalPokerGameRoom.dealtCards = [];
+    mockMentalPokerGameRoom.shownCards = [];
+
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'C',
+      data: {
+        type: 'action/returnToTable',
+        round: 1,
+      },
+    }, 'C', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mockMentalPokerGameRoom.dealtCards).toEqual([
+      [1, 9, 'C'],
+      [1, 10, 'C'],
+    ]);
+    expect(mockMentalPokerGameRoom.shownCards).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 2],
+    ]);
   });
 });
 
@@ -878,6 +1320,89 @@ describe('TexasHoldemGameRoom replay serialization', () => {
   });
 });
 
+describe('TexasHoldemGameRoom live event ordering', () => {
+  test('live pre-flop call+check produces exactly one allSet when events arrive back-to-back', async () => {
+    const gameRoom = new MockGameRoom();
+    gameRoom.peerIdDeferred.resolve('A');
+    const mentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mentalPokerGameRoom.members = ['A', 'B'];
+
+    const texasHoldem = new TexasHoldemGameRoom(gameRoom, mentalPokerGameRoom);
+
+    const allSetEvents: number[] = [];
+    texasHoldem.listener.on('allSet', (round) => allSetEvents.push(round));
+
+    const whoseTurnEvents: Array<[number, string | null, any?]> = [];
+    texasHoldem.listener.on('whoseTurn', (round, whose, meta) => {
+      whoseTurnEvents.push([round, whose, meta]);
+    });
+
+    const replay = false;
+    gameRoom.listener.emit('event', {
+      type: 'public' as const,
+      sender: 'A',
+      data: { type: 'newRound', round: 1, players: ['A', 'B'], settings: { initialFundAmount: 100 } },
+    } as any, 'A', replay);
+
+    gameRoom.listener.emit('event', {
+      type: 'public' as const,
+      sender: 'A',
+      data: { type: 'action/bet', round: 1, amount: 1 },
+    } as any, 'A', replay);
+
+    gameRoom.listener.emit('event', {
+      type: 'public' as const,
+      sender: 'B',
+      data: { type: 'action/bet', round: 1, amount: 0 },
+    } as any, 'B', replay);
+
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(allSetEvents).toEqual([1]);
+    expect(whoseTurnEvents).toEqual([
+      [1, 'A', { callAmount: 1 }],
+      [1, 'B', { callAmount: 0 }],
+      [1, null, undefined],
+      [1, 'A', { callAmount: 0 }],
+    ]);
+
+    texasHoldem.close();
+  });
+
+  test('out-of-turn bet is ignored', async () => {
+    const gameRoom = new MockGameRoom();
+    gameRoom.peerIdDeferred.resolve('A');
+    const mentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mentalPokerGameRoom.members = ['A', 'B'];
+
+    const texasHoldem = new TexasHoldemGameRoom(gameRoom, mentalPokerGameRoom);
+    const betEvents: Array<[number, number, string, boolean]> = [];
+    texasHoldem.listener.on('bet', (round, amount, who, allin) => {
+      betEvents.push([round, amount, who, allin]);
+    });
+
+    gameRoom.listener.emit('event', {
+      type: 'public' as const,
+      sender: 'A',
+      data: { type: 'newRound', round: 1, players: ['A', 'B'], settings: { initialFundAmount: 100 } },
+    } as any, 'A', false);
+
+    await new Promise(r => setTimeout(r, 20));
+    betEvents.length = 0;
+
+    gameRoom.listener.emit('event', {
+      type: 'public' as const,
+      sender: 'B',
+      data: { type: 'action/bet', round: 1, amount: 10 },
+    } as any, 'B', false);
+
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(betEvents).toEqual([]);
+    texasHoldem.close();
+  });
+});
+
 describe('TexasHoldemGameRoom with multiple players', () => {
   const testHostAndGuest = async (
     name: string,
@@ -995,6 +1520,8 @@ describe('TexasHoldemGameRoom with multiple players', () => {
     const [round, players] = await playerEventReceivedPromise;
     expect(round).toEqual(1);
     expect(players).toEqual(['host', 'guest0']);
+
+    await new Promise(r => setTimeout(r, 0));
 
     // expect the hole cards are dealt to the correct player
     for (let mentalPokerGameRoom of [hostMentalPokerGameRoom, guestMentalPokerGameRoom]) {
@@ -1166,8 +1693,10 @@ describe('TexasHoldemGameRoom with multiple players', () => {
     const allRooms = [hostMentalPokerGameRoom, guestMentalPokerGameRoom];
     const boardSubscriber = subscribeEvents(hostTexasHoldemGameRoom, 'board');
     const winnerSubscriber = subscribeEvents(hostTexasHoldemGameRoom, 'winner');
+    const whoseTurnSubscriber = subscribeEvents(hostTexasHoldemGameRoom, 'whoseTurn');
 
     const { round } = await startRound(hostTexasHoldemGameRoom, hostMentalPokerGameRoom, guestMentalPokerGameRoom);
+    whoseTurnSubscriber.pop();
 
     // Pre-flop: host calls, guest checks
     await hostTexasHoldemGameRoom.bet(round, 1);
@@ -1181,6 +1710,7 @@ describe('TexasHoldemGameRoom with multiple players', () => {
     expect(boardEvents.length).toBe(1);
     expect(boardEvents[0][0]).toBe(round);
     expect(boardEvents[0][1]).toHaveLength(3); // flop = 3 cards
+    whoseTurnSubscriber.pop();
 
     // Flop: both check
     await hostTexasHoldemGameRoom.bet(round, 0);
@@ -1193,6 +1723,7 @@ describe('TexasHoldemGameRoom with multiple players', () => {
     boardEvents = boardSubscriber.pop();
     expect(boardEvents.length).toBe(1);
     expect(boardEvents[0][1]).toHaveLength(4); // turn = 4 cards
+    whoseTurnSubscriber.pop();
 
     // Turn: both check
     await hostTexasHoldemGameRoom.bet(round, 0);
@@ -1205,6 +1736,11 @@ describe('TexasHoldemGameRoom with multiple players', () => {
     boardEvents = boardSubscriber.pop();
     expect(boardEvents.length).toBe(1);
     expect(boardEvents[0][1]).toHaveLength(5); // river = 5 cards
+    expect(whoseTurnSubscriber.pop()).toEqual([
+      [round, 'guest0', {callAmount: 0}],
+      [round, null],
+      [round, 'host', {callAmount: 0}],
+    ]);
 
     // River: both check
     await hostTexasHoldemGameRoom.bet(round, 0);
@@ -1437,6 +1973,7 @@ describe('TexasHoldemGameRoom with multiple players', () => {
 
     // guest1 folds
     await guestTexasHoldemGameRooms[1].fold(round);
+    await new Promise(r => setTimeout(r, 0));
 
     const foldEvents = foldSubscriber.pop();
     expect(foldEvents).toEqual([[round, 'guest1']]);
@@ -1449,6 +1986,7 @@ describe('TexasHoldemGameRoom with multiple players', () => {
 
     // host calls
     await hostTexasHoldemGameRoom.bet(round, 1);
+    await new Promise(r => setTimeout(r, 0));
 
     // guest0 (BB) should have turn with callAmount=0
     whoseTurnEvents = whoseTurnSubscriber.pop();
@@ -1477,6 +2015,7 @@ describe('TexasHoldemGameRoom with multiple players', () => {
     // guest1 folds, then host folds
     await guestTexasHoldemGameRooms[1].fold(round);
     await hostTexasHoldemGameRoom.fold(round);
+    await new Promise(r => setTimeout(r, 0));
 
     const winnerEvents = winnerSubscriber.pop();
     expect(winnerEvents.length).toBe(1);

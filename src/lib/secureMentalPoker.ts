@@ -55,8 +55,22 @@ export function encodeStandardCard(card: StandardCard): number {
   return suitIndex * RANKS.length + rankIndex + 1;
 }
 
+export function isEncodedStandardCard(n: number): boolean {
+  return Number.isInteger(n) && n >= 1 && n <= 52;
+}
+
+export function isStandardCard(value: unknown): value is StandardCard {
+  const card = value as StandardCard | undefined;
+  return Boolean(
+    card
+    && typeof card === 'object'
+    && SUITS.includes(card.suit)
+    && RANKS.includes(card.rank)
+  );
+}
+
 export function decodeStandardCard(n: number): StandardCard {
-  if (!Number.isInteger(n) || n < 1 || n > 52) {
+  if (!isEncodedStandardCard(n)) {
     throw new Error(`Invalid encoded card: ${n}`);
   }
   const zeroBased = n - 1;

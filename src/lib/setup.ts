@@ -3,6 +3,7 @@ import GameRoom, {WireGameEvent} from "./GameRoom";
 import {TexasHoldemGameRoom, TexasHoldemTableEvent} from "./texas-holdem/TexasHoldemGameRoom";
 import ChatRoom, {ChatRoomEvent} from "./ChatRoom";
 import CloudflareRelayTransport from "./CloudflareRelayTransport";
+import WorkerRelayMesh from "./WorkerRelayMesh";
 import {
   createEventSigner,
   generateSigningIdentity,
@@ -30,6 +31,7 @@ import {
 type AllEvents = MentalPokerEvent | ChatRoomEvent | TexasHoldemTableEvent;
 
 const MODULUS_LENGTH = 2048;
+const GAME_ROOM_ID_PARAM = 'gameRoomId';
 const TABLE_ID_PARAM = 'tableId';
 
 /**
@@ -155,16 +157,38 @@ function createTableId() {
   return `table-${random}`;
 }
 
-function publishHostTableId(tableId: string) {
+function publishRoomParams(tableId: string, hostId: string | undefined) {
   if (typeof window === 'undefined') {
     return;
   }
   const url = new URL(window.location.href);
-  if (url.searchParams.get(TABLE_ID_PARAM) === tableId) {
+  let changed = false;
+  if (url.searchParams.get(TABLE_ID_PARAM) !== tableId) {
+    url.searchParams.set(TABLE_ID_PARAM, tableId);
+    changed = true;
+  }
+  if (!hostId && url.searchParams.has(GAME_ROOM_ID_PARAM)) {
+    url.searchParams.delete(GAME_ROOM_ID_PARAM);
+    changed = true;
+  }
+  if (!changed) {
     return;
   }
-  url.searchParams.set(TABLE_ID_PARAM, tableId);
   window.history.replaceState(window.history.state, '', url.toString());
+}
+
+function getRoomParams(params: URLSearchParams, localPeerId?: string) {
+  let hostId = params.get(GAME_ROOM_ID_PARAM) || undefined;
+  if (hostId && localPeerId && hostId === localPeerId) {
+    hostId = undefined;
+  }
+
+  const explicitTableId = params.get(TABLE_ID_PARAM) || undefined;
+  return {
+    hostId,
+    tableId: explicitTableId ?? hostId ?? createTableId(),
+    hasExplicitTableId: Boolean(explicitTableId),
+  };
 }
 
 function getPeerServerOptions(iceServers?: RTCIceServer[]) {
@@ -227,15 +251,12 @@ async function initSetup() {
   }
 
   const params = new URLSearchParams(window.location.search);
-  let bootstrapPeerFromUrl = params.get('gameRoomId') ?? undefined;
-  const tableIdFromUrl = params.get(TABLE_ID_PARAM) ?? undefined;
   const storedIdentity = readRegisteredItem(REGISTERED_SIGNING_IDENTITY);
-  if (bootstrapPeerFromUrl && storedIdentity) {
+  let storedPeerId: string | undefined;
+  if (storedIdentity) {
     try {
       const identity: SigningIdentity = JSON.parse(storedIdentity);
-      if (identity.peerId === bootstrapPeerFromUrl) {
-        bootstrapPeerFromUrl = undefined;
-      }
+      storedPeerId = identity.peerId;
     } catch {
       resetRegisteredIdentity();
     }
@@ -245,43 +266,47 @@ async function initSetup() {
   const signingIdentity = await getOrCreateSigningIdentity();
   const eventSigner = await createEventSigner(signingIdentity);
   const peerId = signingIdentity.peerId;
+  const roomParams = getRoomParams(params, storedPeerId ?? peerId);
 
   const iceServers = await fetchMeteredIceServers();
   const peerOptions = getPeerServerOptions(iceServers);
 
-  const bootstrapPeers = bootstrapPeerFromUrl ? [bootstrapPeerFromUrl] : [];
-  const tableId = tableIdFromUrl ?? (bootstrapPeerFromUrl ? bootstrapPeerFromUrl : createTableId());
-  if (!bootstrapPeerFromUrl && !tableIdFromUrl) {
-    publishHostTableId(tableId);
+  const bootstrapPeers = roomParams.hostId ? [roomParams.hostId] : [];
+  const tableId = roomParams.tableId;
+  if (!roomParams.hasExplicitTableId || params.get(TABLE_ID_PARAM) !== tableId || !roomParams.hostId) {
+    publishRoomParams(tableId, roomParams.hostId);
   }
   const roomId = tableId;
 
   const signalingUrl = getSignalingUrl();
-  const transport = signalingUrl
-    ? new CloudflareRelayTransport({
+  const mesh = signalingUrl
+    ? new WorkerRelayMesh<WireGameEvent<AllEvents>>(new CloudflareRelayTransport({
       serverUrl: signalingUrl,
       roomId,
       peerId,
       authToken: authSession.token,
-    })
-    : new PeerJSTransport({
-      peerId,
-      ...(peerOptions ? { peerOptions } : {}),
-    });
-  const mesh = new DandelionMesh<WireGameEvent<AllEvents>>(transport, {
-    bootstrapPeers,
-    modulusLength: MODULUS_LENGTH,
-    cryptoKeyBundle: bundle,
-    raftLog: new LocalStorageRaftLog(`fair-poker:${roomId}:${peerId}`),
-  });
-  (mesh as DandelionMesh<WireGameEvent<AllEvents>> & { connect: (remotePeerId: string) => void }).connect = (remotePeerId) => {
-    if (remotePeerId !== peerId) {
-      transport.connect(remotePeerId);
-    }
-  };
+    }))
+    : (() => {
+      const transport = new PeerJSTransport({
+        peerId,
+        ...(peerOptions ? { peerOptions } : {}),
+      });
+      const dandelionMesh = new DandelionMesh<WireGameEvent<AllEvents>>(transport, {
+        bootstrapPeers,
+        modulusLength: MODULUS_LENGTH,
+        cryptoKeyBundle: bundle,
+        raftLog: new LocalStorageRaftLog(`fair-poker:${roomId}:${peerId}`),
+      });
+      (dandelionMesh as DandelionMesh<WireGameEvent<AllEvents>> & { connect: (remotePeerId: string) => void }).connect = (remotePeerId) => {
+        if (remotePeerId !== peerId) {
+          transport.connect(remotePeerId);
+        }
+      };
+      return dandelionMesh;
+    })();
 
   const gameRoom = new GameRoom<AllEvents>(mesh, {
-    hostId: bootstrapPeerFromUrl,
+    hostId: roomParams.hostId,
     eventSigner,
     rejectUnsignedEvents: true,
   });

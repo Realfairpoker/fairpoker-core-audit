@@ -21,12 +21,16 @@ const emitter = new EventEmitter<TexasHoldemGameRoomEvents>();
 (TexasHoldem as any).fold = jest.fn().mockResolvedValue(undefined);
 (TexasHoldem as any).sitOut = jest.fn().mockResolvedValue(undefined);
 (TexasHoldem as any).returnToTable = jest.fn().mockResolvedValue(undefined);
+(TexasHoldem as any).openRegistration = jest.fn().mockResolvedValue(undefined);
+(TexasHoldem as any).voteToVoidHand = jest.fn().mockResolvedValue(undefined);
 (TexasHoldem as any).startNewRound = jest.fn().mockResolvedValue(undefined);
 
 const mockBet = (TexasHoldem as any).bet as jest.Mock;
 const mockFold = (TexasHoldem as any).fold as jest.Mock;
 const mockSitOut = (TexasHoldem as any).sitOut as jest.Mock;
 const mockReturnToTable = (TexasHoldem as any).returnToTable as jest.Mock;
+const mockOpenRegistration = (TexasHoldem as any).openRegistration as jest.Mock;
+const mockVoteToVoidHand = (TexasHoldem as any).voteToVoidHand as jest.Mock;
 const mockStartNewRound = (TexasHoldem as any).startNewRound as jest.Mock;
 
 const defaultSnapshot = () => ({
@@ -37,6 +41,7 @@ const defaultSnapshot = () => ({
   whoseTurnByRound: new Map(),
   potAmount: 0,
   winnersByRound: new Map(),
+  handPauseByRound: new Map(),
   settingsByRound: new Map(),
   bankrolls: new Map(),
 });
@@ -51,6 +56,8 @@ beforeEach(() => {
   mockFold.mockClear();
   mockSitOut.mockClear();
   mockReturnToTable.mockClear();
+  mockOpenRegistration.mockClear();
+  mockVoteToVoidHand.mockClear();
   mockStartNewRound.mockClear();
 });
 
@@ -73,6 +80,7 @@ describe('useTexasHoldem', () => {
     expect(result.current.potAmount).toBe(0);
     expect(result.current.bankrolls.size).toBe(0);
     expect(result.current.scoreBoard.size).toBe(0);
+    expect(result.current.handScoreBoard.size).toBe(0);
     expect(result.current.totalDebt.size).toBe(0);
     expect(result.current.myBetAmount).toBeUndefined();
     expect(result.current.lastWinningResult).toBeUndefined();
@@ -197,6 +205,7 @@ describe('useTexasHoldem', () => {
     });
 
     expect(result.current.scoreBoard.get('Alice')).toBe(100);
+    expect(result.current.handScoreBoard.get('Alice')).toBe(100);
     expect(result.current.totalDebt.size).toBe(0);
 
     act(() => {
@@ -204,6 +213,37 @@ describe('useTexasHoldem', () => {
     });
 
     expect(result.current.scoreBoard.get('Alice')).toBe(95);
+    expect(result.current.handScoreBoard.get('Alice')).toBe(95);
+  });
+
+  test('handScoreBoard resets when a new hand starts', () => {
+    const {result} = renderHook(() => useTexasHoldem());
+
+    act(() => {
+      emitter.emit('players', 1, ['Alice', 'Bob']);
+      emitter.emit('fund', 90, 100, 'Alice');
+      emitter.emit('fund', 110, 100, 'Bob');
+    });
+
+    expect(result.current.scoreBoard.get('Alice')).toBe(-10);
+    expect(result.current.scoreBoard.get('Bob')).toBe(10);
+    expect(result.current.handScoreBoard.get('Alice')).toBe(-10);
+    expect(result.current.handScoreBoard.get('Bob')).toBe(10);
+
+    act(() => {
+      emitter.emit('players', 2, ['Bob', 'Alice']);
+    });
+
+    expect(result.current.scoreBoard.get('Alice')).toBe(-10);
+    expect(result.current.scoreBoard.get('Bob')).toBe(10);
+    expect(result.current.handScoreBoard.size).toBe(0);
+
+    act(() => {
+      emitter.emit('fund', 85, 90, 'Alice');
+    });
+
+    expect(result.current.scoreBoard.get('Alice')).toBe(-15);
+    expect(result.current.handScoreBoard.get('Alice')).toBe(-5);
   });
 
   test('borrowed fund events update totalDebt, not scoreBoard', () => {
@@ -215,6 +255,7 @@ describe('useTexasHoldem', () => {
 
     expect(result.current.totalDebt.get('Alice')).toBe(100);
     expect(result.current.scoreBoard.has('Alice')).toBe(false);
+    expect(result.current.handScoreBoard.has('Alice')).toBe(false);
   });
 
   test('board events update board', () => {
@@ -580,14 +621,14 @@ describe('useTexasHoldem', () => {
     expect(mockSitOut).toHaveBeenCalledWith(1);
   });
 
-  test('sitOut does nothing when no round', async () => {
+  test('sitOut can mark the player as watching before a round exists', async () => {
     const {result} = renderHook(() => useTexasHoldem());
 
     await act(async () => {
       await result.current.actions.sitOut();
     });
 
-    expect(mockSitOut).not.toHaveBeenCalled();
+    expect(mockSitOut).toHaveBeenCalledWith(null);
   });
 
   test('returnToTable calls TexasHoldem.returnToTable with current round', async () => {
@@ -602,6 +643,40 @@ describe('useTexasHoldem', () => {
     });
 
     expect(mockReturnToTable).toHaveBeenCalledWith(1);
+  });
+
+  test('returnToTable can use a worker-provided round when local round is missing', async () => {
+    const {result} = renderHook(() => useTexasHoldem());
+
+    await act(async () => {
+      await result.current.actions.returnToTable(7);
+    });
+
+    expect(mockReturnToTable).toHaveBeenCalledWith(7);
+  });
+
+  test('returnToTable can join registration without a local round', async () => {
+    const {result} = renderHook(() => useTexasHoldem());
+
+    await act(async () => {
+      await result.current.actions.returnToTable(null);
+    });
+
+    expect(mockReturnToTable).toHaveBeenCalledWith(null);
+  });
+
+  test('openRegistration asks the worker to clear the next match roster', async () => {
+    const {result} = renderHook(() => useTexasHoldem());
+
+    act(() => {
+      emitter.emit('players', 10, ['A', 'B']);
+    });
+
+    await act(async () => {
+      await result.current.actions.openRegistration();
+    });
+
+    expect(mockOpenRegistration).toHaveBeenCalledWith(10);
   });
 
   test('startGame calls TexasHoldem.startNewRound with defaults', async () => {
@@ -619,6 +694,7 @@ describe('useTexasHoldem', () => {
       autoFoldTimeoutSeconds: 60,
       plannedRounds: 10,
       seriesStartRound: undefined,
+      participants: undefined,
     });
   });
 
@@ -637,6 +713,7 @@ describe('useTexasHoldem', () => {
       autoFoldTimeoutSeconds: 60,
       plannedRounds: 10,
       seriesStartRound: undefined,
+      participants: undefined,
     });
   });
 
@@ -655,6 +732,7 @@ describe('useTexasHoldem', () => {
       autoFoldTimeoutSeconds: 60,
       plannedRounds: 3,
       seriesStartRound: 4,
+      participants: undefined,
     });
   });
 
@@ -673,6 +751,7 @@ describe('useTexasHoldem', () => {
       autoFoldTimeoutSeconds: 60,
       plannedRounds: 10,
       seriesStartRound: undefined,
+      participants: undefined,
     });
   });
 

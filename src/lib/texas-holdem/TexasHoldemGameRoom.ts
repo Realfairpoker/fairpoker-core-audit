@@ -6,7 +6,7 @@ import {
 import EventEmitter from "eventemitter3";
 import LifecycleManager from "../LifecycleManager";
 import {EventListener} from "../types";
-import {Board, CARDS, evaluateStandardCards, Flop, Hole, River, Turn} from "../rules";
+import {Board, CARDS, evaluateStandardCards, Hole} from "../rules";
 import Deferred from "../Deferred";
 import {StandardCard} from "../secureMentalPoker";
 import {handRank} from "phe";
@@ -28,9 +28,25 @@ export interface ShowdownResult {
   }>;
 }
 
+export interface VoidedHandResult {
+  how: 'Voided',
+  round: number,
+  missingPlayers: string[],
+  approvals: string[],
+}
+
 export type WinningResult =
   | LastOneWins
-  | ShowdownResult;
+  | ShowdownResult
+  | VoidedHandResult;
+
+export interface HandPauseState {
+  round: number;
+  missingPlayers: string[];
+  voters: string[];
+  approvals: string[];
+  rejections: string[];
+}
 
 export interface TexasHoldemGameRoomEvents {
   connected: (peerId: string) => void;
@@ -49,6 +65,7 @@ export interface TexasHoldemGameRoomEvents {
   allSet: (round: number) => void;
   fund: (fund: number, previousFund: number | undefined, whose: string, borrowed?: boolean) => void;
   winner: (result: WinningResult) => void;
+  handPause: (state: HandPauseState | null) => void;
   roundSettings: (round: number, settings: TexasHoldemRoundSettings) => void;
   transcript: (entry: TranscriptEntry<unknown>) => void;
 }
@@ -78,6 +95,7 @@ export interface TexasHoldemRoundSettings {
   autoFoldTimeoutSeconds?: number;
   plannedRounds?: number;
   seriesStartRound?: number;
+  participants?: string[];
 }
 
 export interface TexasHoldemStateSnapshot {
@@ -89,6 +107,7 @@ export interface TexasHoldemStateSnapshot {
   potAmount: number;
   bankrolls: Map<string, number>;
   winnersByRound: Map<number, WinningResult>;
+  handPauseByRound: Map<number, HandPauseState>;
   settingsByRound: Map<number, TexasHoldemRoundSettings>;
 }
 
@@ -137,12 +156,23 @@ export interface AutoFoldEvent {
 
 export interface SitOutEvent {
   type: 'action/sitOut';
-  round: number;
+  round?: number | null;
 }
 
 export interface ReturnToTableEvent {
   type: 'action/returnToTable';
+  round?: number | null;
+}
+
+export interface OpenRegistrationEvent {
+  type: 'action/openRegistration';
+  round?: number | null;
+}
+
+export interface VoidHandVoteEvent {
+  type: 'action/voidHandVote';
   round: number;
+  approve: boolean;
 }
 
 export type TexasHoldemTableEvent =
@@ -151,7 +181,9 @@ export type TexasHoldemTableEvent =
   | FoldEvent
   | AutoFoldEvent
   | SitOutEvent
-  | ReturnToTableEvent;
+  | ReturnToTableEvent
+  | OpenRegistrationEvent
+  | VoidHandVoteEvent;
 
 function normalizeAutoFoldTimeoutSeconds(timeoutSeconds: number | undefined) {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds === undefined) {
@@ -221,6 +253,8 @@ class TexasHoldemRound {
   currentTurn: string | null = null;
   currentTurnStartedAtMs: number = 0;
   currentTurnTimer?: ReturnType<typeof setTimeout>;
+  pausedMissingPlayers: string[] = [];
+  voidVotes: Map<string, boolean> = new Map();
 }
 
 export class TexasHoldemGameRoom {
@@ -241,16 +275,14 @@ export class TexasHoldemGameRoom {
   private whoseTurnByRound: Map<number, { whoseTurn: string; callAmount: number } | null> = new Map();
   private potAmount: number = 0;
   private winnersByRound: Map<number, WinningResult> = new Map();
+  private handPauseByRound: Map<number, HandPauseState> = new Map();
   private settingsByRound: Map<number, TexasHoldemRoundSettings> = new Map();
   private holeKeyRetryTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
-  // During replay, Raft's applyCommitted fires all events synchronously via
-  // EventEmitter.  Async handlers (handleBetEvent, handleFoldEvent) modify
-  // shared state (calledPlayers) synchronously but defer continueUnlessAllSet
-  // to microtasks.  Without serialization, every bet's synchronous part runs
-  // before any continueUnlessAllSet, corrupting the per-stage called tracking.
-  // Chain replay events so each handler completes before the next starts.
-  private replayChain: Promise<void> = Promise.resolve();
+  // GameRoom emits committed events through EventEmitter, which does not wait
+  // for async handlers. Queue every table event so turn/street state changes
+  // cannot interleave when messages arrive close together or during replay.
+  private eventChain: Promise<void> = Promise.resolve();
 
   constructor(
     gameRoom: GameRoomLike<TexasHoldemTableEvent | any>,
@@ -295,31 +327,24 @@ export class TexasHoldemGameRoom {
           case 'action/sitOut':
             return this.handleSitOutEvent(data, who, !!replay);
           case 'action/returnToTable':
-            return this.handleReturnToTableEvent(data, who);
+            return this.handleReturnToTableEvent(data, who, !!replay);
+          case 'action/openRegistration':
+            return this.handleOpenRegistrationEvent();
+          case 'action/voidHandVote':
+            return this.handleVoidHandVoteEvent(data, who);
         }
       };
 
-      if (replay) {
-        this.replayChain = this.replayChain.then(handle);
-      } else {
-        handle();
-      }
+      this.eventChain = this.eventChain.then(handle).catch(error => {
+        console.error(`Failed to handle Texas Hold'em event ${data.type}.`, error);
+      });
     }, listener => this.gameRoom.listener.off('event', listener)));
   }
 
   async startNewRound(settings: TexasHoldemRoundSettings) {
+    await this.eventChain;
     const normalizedSettings = normalizeRoundSettings(settings, settings.seriesStartRound ?? this.round + 1);
-    const seatedPlayers = this.mentalPokerGameRoom.members
-      .filter(player => !this.sittingOutPlayers.has(player));
-    const seatedPlayerSet = new Set(seatedPlayers);
-    const previousPlayers = this.playersByRound.get(this.round);
-    const previousPlayersStillSeated = previousPlayers
-      ? previousPlayers.filter(player => seatedPlayerSet.has(player))
-      : [];
-    const newSeatedPlayers = seatedPlayers.filter(player => !previousPlayersStillSeated.includes(player));
-    const players: string[] = previousPlayersStillSeated.length > 0
-      ? [...previousPlayersStillSeated, ...newSeatedPlayers]
-      : seatedPlayers;
+    const players = this.getNextRoundPlayers(settings.participants);
     if (players.length < 2) {
       throw new Error('There should be at least 2 players to start a new round.');
     }
@@ -330,24 +355,10 @@ export class TexasHoldemGameRoom {
       ...players.slice(0, sbOffset),
     ];
 
-    const deckReady = new Promise<void>(resolve => {
-      const handler = () => {
-        this.mentalPokerGameRoom.listener.off('shuffled', handler);
-        resolve();
-      };
-      this.mentalPokerGameRoom.listener.on('shuffled', handler);
-    });
-
     this.round = await this.mentalPokerGameRoom.startNewRound({
       participants: playersOrdered,
       bits: normalizedSettings.bits,
     });
-
-    // Wait for the deck protocol (encrypt/shuffle/finalize) to complete
-    // before firing newRound. This ensures all protocol events are committed
-    // to the Raft log, so a page refresh at any point after the game UI
-    // appears can be fully replayed.
-    await deckReady;
 
     await this.gameRoom.emitEvent({
       type: 'public',
@@ -359,6 +370,10 @@ export class TexasHoldemGameRoom {
         players: playersOrdered,
       },
     });
+  }
+
+  canStartNewRound() {
+    return this.getNextRoundPlayers().length >= 2;
   }
 
   async bet(round: number, amount: number) {
@@ -398,8 +413,10 @@ export class TexasHoldemGameRoom {
     });
   }
 
-  async sitOut(round: number) {
-    await this.clearLocalTurnTimerForSubmittedAction(round);
+  async sitOut(round?: number | null) {
+    if (typeof round === 'number') {
+      await this.clearLocalTurnTimerForSubmittedAction(round);
+    }
     await this.gameRoom.emitEvent({
       type: 'public',
       sender: await this.gameRoom.peerIdAsync,
@@ -410,13 +427,36 @@ export class TexasHoldemGameRoom {
     });
   }
 
-  async returnToTable(round: number) {
+  async returnToTable(round?: number | null) {
     await this.gameRoom.emitEvent({
       type: 'public',
       sender: await this.gameRoom.peerIdAsync,
       data: {
         type: 'action/returnToTable',
         round,
+      },
+    });
+  }
+
+  async openRegistration(round?: number | null) {
+    await this.gameRoom.emitEvent({
+      type: 'public',
+      sender: await this.gameRoom.peerIdAsync,
+      data: {
+        type: 'action/openRegistration',
+        round,
+      },
+    });
+  }
+
+  async voteToVoidHand(round: number, approve: boolean) {
+    await this.gameRoom.emitEvent({
+      type: 'public',
+      sender: await this.gameRoom.peerIdAsync,
+      data: {
+        type: 'action/voidHandVote',
+        round,
+        approve,
       },
     });
   }
@@ -435,6 +475,29 @@ export class TexasHoldemGameRoom {
 
   get members() {
     return this.mentalPokerGameRoom.members;
+  }
+
+  private getNextRoundPlayers(overridePlayers?: string[]) {
+    const seatedPlayers = this.mentalPokerGameRoom.members
+      .filter(player => !this.sittingOutPlayers.has(player));
+    if (overridePlayers?.length) {
+      const canonicalPlayers = overridePlayers.filter((player, index) => (
+        !this.sittingOutPlayers.has(player)
+        && overridePlayers.indexOf(player) === index
+      ));
+      if (canonicalPlayers.length > 0) {
+        return canonicalPlayers;
+      }
+    }
+    const seatedPlayerSet = new Set(seatedPlayers);
+    const previousPlayers = this.playersByRound.get(this.round);
+    const previousPlayersStillSeated = previousPlayers
+      ? previousPlayers.filter(player => seatedPlayerSet.has(player))
+      : [];
+    const newSeatedPlayers = seatedPlayers.filter(player => !previousPlayersStillSeated.includes(player));
+    return previousPlayersStillSeated.length > 0
+      ? [...previousPlayersStillSeated, ...newSeatedPlayers]
+      : seatedPlayers;
   }
 
   close() {
@@ -462,6 +525,7 @@ export class TexasHoldemGameRoom {
       potAmount: this.potAmount,
       bankrolls: new Map(this.funds),
       winnersByRound: new Map(this.winnersByRound),
+      handPauseByRound: new Map(this.handPauseByRound),
       settingsByRound: new Map(this.settingsByRound),
     };
   }
@@ -483,9 +547,6 @@ export class TexasHoldemGameRoom {
 
     const roundData = new TexasHoldemRound();
 
-    // bind events
-    this.registerBoardEvents(round, roundData);
-
     // hole
     this.registerHoleEvents(round, roundData);
 
@@ -494,24 +555,6 @@ export class TexasHoldemGameRoom {
 
     this.dataByRounds.set(round, roundData);
     return roundData;
-  }
-
-  private registerBoardEvents(round: number, roundData: TexasHoldemRound) {
-    Promise.all(roundData.knownCards.slice(0, 3).map(d => d.promise)).then(flop => {
-      roundData.stage = Stage.FLOP;
-      this.boardByRound.set(round, [...flop] as Flop);
-      this.emitter.emit('board', round, flop as Flop);
-    });
-    Promise.all(roundData.knownCards.slice(0, 4).map(d => d.promise)).then(turn => {
-      roundData.stage = Stage.TURN;
-      this.boardByRound.set(round, [...turn] as Turn);
-      this.emitter.emit('board', round, turn as Turn);
-    });
-    Promise.all(roundData.knownCards.slice(0, 5).map(d => d.promise)).then(river => {
-      roundData.stage = Stage.RIVER;
-      this.boardByRound.set(round, [...river] as River);
-      this.emitter.emit('board', round, river as River);
-    });
   }
 
   private registerHoleEvents(round: number, roundData: TexasHoldemRound) {
@@ -658,6 +701,74 @@ export class TexasHoldemGameRoom {
     return amountsToBeUpdated;
   }
 
+  private updateVisibleBoard(round: number, roundData: TexasHoldemRound, board: Board) {
+    switch (board.length) {
+      case 0:
+        roundData.stage = Stage.PRE_FLOP;
+        break;
+      case 3:
+        roundData.stage = Stage.FLOP;
+        break;
+      case 4:
+        roundData.stage = Stage.TURN;
+        break;
+      case 5:
+        roundData.stage = Stage.RIVER;
+        break;
+    }
+    this.boardByRound.set(round, [...board] as Board);
+    this.emitter.emit('board', round, board);
+  }
+
+  private visibleBoardCountForStage(stage: Stage) {
+    switch (stage) {
+      case Stage.PRE_FLOP:
+        return 0;
+      case Stage.FLOP:
+        return 3;
+      case Stage.TURN:
+        return 4;
+      case Stage.RIVER:
+        return 5;
+    }
+  }
+
+  private advanceBoardStage(roundData: TexasHoldemRound, visibleCount: 3 | 4 | 5) {
+    switch (visibleCount) {
+      case 3:
+        roundData.stage = Stage.FLOP;
+        break;
+      case 4:
+        roundData.stage = Stage.TURN;
+        break;
+      case 5:
+        roundData.stage = Stage.RIVER;
+        break;
+    }
+  }
+
+  private async revealBoardCards(round: number, roundData: TexasHoldemRound, visibleCount: 3 | 4 | 5, replay?: boolean, forceResend = false) {
+    const currentVisibleCount = this.visibleBoardCountForStage(roundData.stage);
+    const currentBoardCount = this.boardByRound.get(round)?.length ?? 0;
+    if (!forceResend && visibleCount <= currentVisibleCount && currentBoardCount >= visibleCount) {
+      return;
+    }
+
+    if (!replay) {
+      const firstMissingOffset = forceResend ? 0 : Math.min(currentBoardCount, visibleCount);
+      for (let cardOffset = firstMissingOffset; cardOffset < visibleCount; cardOffset += 1) {
+        await this.mentalPokerGameRoom.showCard(round, cardOffset);
+      }
+    }
+
+    this.advanceBoardStage(roundData, visibleCount);
+    Promise.all(roundData.knownCards.slice(0, visibleCount).map(d => d.promise)).then(board => {
+      if ((this.boardByRound.get(round)?.length ?? 0) < visibleCount) {
+        this.updateVisibleBoard(round, roundData, board as Board);
+      }
+    });
+  }
+
   private async handleNewRoundEvent(e: NewRoundEvent, replay: boolean) {
     const normalizedSettings = normalizeRoundSettings(e.settings, e.round);
     for (let player of e.players) {
@@ -671,6 +782,13 @@ export class TexasHoldemGameRoom {
     roundData.settings = normalizedSettings;
     this.settingsByRound.set(e.round, normalizedSettings);
     this.playersByRound.set(e.round, [...e.players]);
+    for (const member of this.mentalPokerGameRoom.members) {
+      if (e.players.includes(member)) {
+        this.sittingOutPlayers.delete(member);
+      } else {
+        this.sittingOutPlayers.add(member);
+      }
+    }
     roundData.playersOrdered.resolve(e.players);
     this.emitter.emit('roundSettings', e.round, roundData.settings);
     this.emitter.emit('players', e.round, e.players);
@@ -709,6 +827,19 @@ export class TexasHoldemGameRoom {
       await this.mentalPokerGameRoom.dealCard(round, holeOffsets[0], players[i]);
       await this.mentalPokerGameRoom.dealCard(round, holeOffsets[1], players[i]);
     }
+  }
+
+  private async dealHoleCardsToPlayer(round: number, players: string[], player: string) {
+    const playerOffset = players.indexOf(player);
+    if (playerOffset < 0) {
+      return;
+    }
+    const holeOffsets = [
+      playerOffset * 2 + 5,
+      playerOffset * 2 + 6,
+    ];
+    await this.mentalPokerGameRoom.dealCard(round, holeOffsets[0], player);
+    await this.mentalPokerGameRoom.dealCard(round, holeOffsets[1], player);
   }
 
   private scheduleHoleKeyRetry(round: number, players: string[], roundData: TexasHoldemRound, attempt = 0) {
@@ -760,6 +891,10 @@ export class TexasHoldemGameRoom {
   }
 
   private async handleSitOutEvent(e: SitOutEvent, who: string, replay: boolean) {
+    if (typeof e.round !== 'number') {
+      this.sittingOutPlayers.add(who);
+      return;
+    }
     const round = this.getOrCreateDataForRound(e.round);
     this.sittingOutPlayers.add(who);
     if (round.result) {
@@ -772,26 +907,179 @@ export class TexasHoldemGameRoom {
     await this.handleFold(e.round, who, replay);
   }
 
-  private handleReturnToTableEvent(_e: ReturnToTableEvent, who: string) {
+  private async handleReturnToTableEvent(e: ReturnToTableEvent, who: string, replay: boolean) {
+    const roundNo = typeof e.round === 'number' ? e.round : undefined;
+    const round = roundNo ? this.dataByRounds.get(roundNo) : undefined;
+    if (round?.foldPlayers.has(who)) {
+      await this.revealFoldedPlayerRecoveryCards(roundNo!, round, who, replay);
+    }
     this.sittingOutPlayers.delete(who);
+    if (round?.pausedMissingPlayers.includes(who)) {
+      this.removeReturnedPlayerFromPause(roundNo!, round, who);
+    }
+    if (round && !round.result && !replay) {
+      await this.resendVisibleCardsForReturnedPlayer(roundNo!, round, who);
+      await this.resumePendingCardDisclosure(roundNo!, round, true);
+    }
   }
 
-  private handleMembersChanged(members: string[]) {
-    const activeMembers = new Set(members);
+  private handleOpenRegistrationEvent() {
+    this.sittingOutPlayers.clear();
+  }
 
-    for (const [roundNo, roundData] of Array.from(this.dataByRounds.entries())) {
-      const disconnectedTurn = roundData.currentTurn;
-      if (
-        roundData.result
-        || !disconnectedTurn
-        || activeMembers.has(disconnectedTurn)
-        || roundData.foldPlayers.has(disconnectedTurn)
-        || roundData.allInPlayers.has(disconnectedTurn)
-      ) {
-        continue;
-      }
-      this.autoFold(roundNo, disconnectedTurn).catch(e => console.error('Failed to auto-fold disconnected player', e));
+  private handleMembersChanged(_members: string[]) {
+    if (!this.round) {
+      return;
     }
+    const roundData = this.dataByRounds.get(this.round);
+    if (!roundData || roundData.result) {
+      return;
+    }
+    this.refreshPauseState(this.round, roundData);
+  }
+
+  private refreshPauseState(roundNo: number, roundData: TexasHoldemRound) {
+    void roundData.playersOrdered.promise.then(players => {
+      if (roundData.result) {
+        this.clearPauseState(roundNo, roundData);
+        return;
+      }
+      const connected = new Set(this.mentalPokerGameRoom.members);
+      const missingPlayers = players.filter(player =>
+        !connected.has(player)
+        && !roundData.foldPlayers.has(player)
+      );
+
+      if (missingPlayers.length === 0) {
+        this.clearPauseState(roundNo, roundData);
+        return;
+      }
+
+      roundData.pausedMissingPlayers = missingPlayers;
+      this.clearTurnTimer(roundData);
+      this.publishPauseState(roundNo, roundData);
+    });
+  }
+
+  private clearPauseState(roundNo: number, roundData: TexasHoldemRound) {
+    if (!roundData.pausedMissingPlayers.length && !this.handPauseByRound.has(roundNo)) {
+      return;
+    }
+    roundData.pausedMissingPlayers = [];
+    roundData.voidVotes.clear();
+    this.handPauseByRound.delete(roundNo);
+    this.emitter.emit('handPause', null);
+    if (roundData.currentTurn && !roundData.result) {
+      const actionMeta = this.whoseTurnByRound.get(roundNo);
+      this.emitWhoseTurn(
+        roundNo,
+        roundData,
+        roundData.currentTurn,
+        actionMeta ? {callAmount: actionMeta.callAmount} : undefined,
+      );
+    }
+    void this.resumePendingCardDisclosure(roundNo, roundData);
+  }
+
+  private removeReturnedPlayerFromPause(roundNo: number, roundData: TexasHoldemRound, who: string) {
+    roundData.pausedMissingPlayers = roundData.pausedMissingPlayers.filter(player => player !== who);
+    roundData.voidVotes.delete(who);
+    if (roundData.pausedMissingPlayers.length === 0) {
+      this.clearPauseState(roundNo, roundData);
+      return;
+    }
+    this.publishPauseState(roundNo, roundData);
+  }
+
+  private async resumePendingCardDisclosure(roundNo: number, roundData: TexasHoldemRound, skipBoardReveal = false) {
+    if (roundData.result) {
+      return;
+    }
+    const visibleCount = this.visibleBoardCountForStage(roundData.stage);
+    if (!skipBoardReveal && (visibleCount === 3 || visibleCount === 4 || visibleCount === 5)) {
+      await this.revealBoardCards(roundNo, roundData, visibleCount);
+    }
+    if (roundData.showdownReady) {
+      await this.showdown(roundNo, roundData);
+    }
+  }
+
+  private async resendVisibleCardsForReturnedPlayer(roundNo: number, roundData: TexasHoldemRound, who: string) {
+    const players = await roundData.playersOrdered.promise;
+    if (!roundData.foldPlayers.has(who)) {
+      await this.dealHoleCardsToPlayer(roundNo, players, who);
+    }
+    const visibleCount = this.visibleBoardCountForStage(roundData.stage);
+    if (visibleCount === 3 || visibleCount === 4 || visibleCount === 5) {
+      await this.revealBoardCards(roundNo, roundData, visibleCount, false, true);
+    }
+  }
+
+  private getPauseVoters(roundData: TexasHoldemRound, players: string[]) {
+    const connected = new Set(this.mentalPokerGameRoom.members);
+    const missing = new Set(roundData.pausedMissingPlayers);
+    return players.filter(player => connected.has(player) && !missing.has(player));
+  }
+
+  private publishPauseState(roundNo: number, roundData: TexasHoldemRound) {
+    void roundData.playersOrdered.promise.then(players => {
+      if (!roundData.pausedMissingPlayers.length || roundData.result) {
+        return;
+      }
+      const voters = this.getPauseVoters(roundData, players);
+      const approvals = voters.filter(player => roundData.voidVotes.get(player) === true);
+      const rejections = voters.filter(player => roundData.voidVotes.get(player) === false);
+      const state: HandPauseState = {
+        round: roundNo,
+        missingPlayers: [...roundData.pausedMissingPlayers],
+        voters,
+        approvals,
+        rejections,
+      };
+      this.handPauseByRound.set(roundNo, state);
+      this.emitter.emit('handPause', state);
+    });
+  }
+
+  private async handleVoidHandVoteEvent(e: VoidHandVoteEvent, who: string) {
+    const roundData = this.dataByRounds.get(e.round);
+    if (!roundData || roundData.result || !roundData.pausedMissingPlayers.length) {
+      return;
+    }
+    const players = await roundData.playersOrdered.promise;
+    const voters = this.getPauseVoters(roundData, players);
+    if (!voters.includes(who)) {
+      return;
+    }
+    roundData.voidVotes.set(who, e.approve);
+
+    const approvals = voters.filter(player => roundData.voidVotes.get(player) === true);
+    if (voters.length > 0 && approvals.length === voters.length) {
+      this.voidHand(e.round, roundData, approvals);
+      return;
+    }
+    this.publishPauseState(e.round, roundData);
+  }
+
+  private voidHand(roundNo: number, roundData: TexasHoldemRound, approvals: string[]) {
+    const result: VoidedHandResult = {
+      how: 'Voided',
+      round: roundNo,
+      missingPlayers: [...roundData.pausedMissingPlayers],
+      approvals,
+    };
+    roundData.result = result;
+    this.clearTurnTimer(roundData);
+    for (const [player, amount] of Array.from(roundData.pot.entries())) {
+      this.updateFundOfPlayer(player, (this.funds.get(player) ?? 0) + amount);
+    }
+    roundData.pot.clear();
+    this.potAmount = 0;
+    this.emitter.emit('pot', roundNo, 0);
+    this.winnersByRound.set(roundNo, result);
+    this.handPauseByRound.delete(roundNo);
+    this.emitter.emit('handPause', null);
+    this.emitter.emit('winner', result);
   }
 
   private clearTurnTimer(roundData: TexasHoldemRound) {
@@ -823,10 +1111,7 @@ export class TexasHoldemGameRoom {
     const timeoutSeconds = roundData.settings?.autoFoldTimeoutSeconds;
     const timeoutMs = timeoutSeconds ? timeoutSeconds * 1000 : 0;
     const replayedOpponentTurn = replay && whose !== this.mentalPokerGameRoom.peerId;
-    const disconnectedTurn = Boolean(whose && !this.mentalPokerGameRoom.members.includes(whose));
-    const timerDelayMs = disconnectedTurn
-      ? 0
-      : replayedOpponentTurn && timeoutMs
+    const timerDelayMs = replayedOpponentTurn && timeoutMs
         ? Math.min(REPLAY_AUTO_FOLD_GRACE_MS, timeoutMs)
         : timeoutMs;
     roundData.currentTurn = whose;
@@ -861,9 +1146,6 @@ export class TexasHoldemGameRoom {
     if (replay) {
       return true;
     }
-    if (!this.mentalPokerGameRoom.members.includes(target)) {
-      return true;
-    }
     const timeoutSeconds = roundData.settings?.autoFoldTimeoutSeconds;
     if (!timeoutSeconds || !roundData.currentTurnStartedAtMs) {
       return false;
@@ -886,6 +1168,14 @@ export class TexasHoldemGameRoom {
     const round = this.getOrCreateDataForRound(roundNo);
     if (round.result) {
       console.warn(`Cannot bet since this round has ended.`);
+      return;
+    }
+    if (!isSbBbFirstBet && round.pausedMissingPlayers.length > 0) {
+      console.warn(`Cannot bet while the hand is paused.`);
+      return;
+    }
+    if (!isSbBbFirstBet && round.currentTurn !== who) {
+      console.warn(`Ignoring bet from ${who}; current turn is ${round.currentTurn ?? 'none'}.`);
       return;
     }
     const pot = round.pot;
@@ -939,6 +1229,9 @@ export class TexasHoldemGameRoom {
     if (round.result) {
       return;
     }
+    if (round.pausedMissingPlayers.length > 0 && !round.pausedMissingPlayers.includes(who)) {
+      return;
+    }
     if (round.foldPlayers.has(who)) {
       return;
     }
@@ -966,7 +1259,42 @@ export class TexasHoldemGameRoom {
       const newFundOfWinner = (this.funds.get(winner) ?? 0) + totalPotAmount;
       this.updateFundOfPlayer(winner, newFundOfWinner);
     } else {
+      await this.revealFoldedPlayerRecoveryCards(roundNo, round, who, replay);
       await this.continueUnlessAllSet(roundNo, round, who, replay);
+    }
+  }
+
+  private async revealFoldedPlayerRecoveryCards(
+    roundNo: number,
+    round: TexasHoldemRound,
+    foldedPlayer: string,
+    replay: boolean,
+  ) {
+    if (replay) {
+      return;
+    }
+    const myPeerId = await this.gameRoom.peerIdAsync;
+    if (foldedPlayer !== myPeerId) {
+      return;
+    }
+
+    const players = await round.playersOrdered.promise;
+    const activePlayers = players.filter(player => !round.foldPlayers.has(player));
+    if (activePlayers.length < 2) {
+      return;
+    }
+
+    const offsets = new Set<number>([0, 1, 2, 3, 4]);
+    players.forEach((player, playerOffset) => {
+      if (round.foldPlayers.has(player)) {
+        return;
+      }
+      offsets.add(playerOffset * 2 + 5);
+      offsets.add(playerOffset * 2 + 6);
+    });
+
+    for (const offset of Array.from(offsets).sort((a, b) => a - b)) {
+      await this.mentalPokerGameRoom.showCard(roundNo, offset);
     }
   }
 
@@ -997,30 +1325,28 @@ export class TexasHoldemGameRoom {
         this.tryResolveShowdown(round, roundData);
       }
 
-      if (!replay) {
-        const cardOffsetsToShow: number[] = (() => {
-          switch (roundData.stage) {
-            case Stage.PRE_FLOP:
-              return everyOneElseIsAllinOrFolds ? [0, 1, 2, 3, 4] : [0, 1, 2];
-            case Stage.FLOP:
-              return everyOneElseIsAllinOrFolds ? [3, 4] : [3];
-            case Stage.TURN:
-              return [4];
-            case Stage.RIVER:
-              return [];
-          }
-        })();
-
-        for (let cardOffset of cardOffsetsToShow) {
-          await this.mentalPokerGameRoom.showCard(round, cardOffset);
+      const nextVisibleBoardCount: 3 | 4 | 5 | null = (() => {
+        switch (roundData.stage) {
+          case Stage.PRE_FLOP:
+            return everyOneElseIsAllinOrFolds ? 5 : 3;
+          case Stage.FLOP:
+            return everyOneElseIsAllinOrFolds ? 5 : 4;
+          case Stage.TURN:
+            return 5;
+          case Stage.RIVER:
+            return null;
         }
+      })();
 
-        if (shouldShowdown) {
-          await this.showdown(round, roundData);
-        }
+      if (nextVisibleBoardCount !== null) {
+        await this.revealBoardCards(round, roundData, nextVisibleBoardCount, replay);
       }
 
-      if (!everyOneElseIsAllinOrFolds && roundData.stage !== Stage.RIVER) {
+      if (!replay && shouldShowdown) {
+        await this.showdown(round, roundData);
+      }
+
+      if (!everyOneElseIsAllinOrFolds && !shouldShowdown) {
         this.emitWhoseTurn(
           round,
           roundData,
