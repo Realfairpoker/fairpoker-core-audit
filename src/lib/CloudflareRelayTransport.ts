@@ -52,6 +52,8 @@ type RelayCapabilities = {
   orderedEventLog?: boolean;
 };
 
+const liveRelaySeqByRoomAndPeer = new Map<string, number>();
+
 export type WorkerPlayerStatus = 'active' | 'watching' | 'sittingOut' | 'timedOut' | 'offline';
 
 export type WorkerRoomPlayerState = {
@@ -127,6 +129,8 @@ function writeLastRelaySeq(roomId: string, peerId: string, seq: number) {
     return;
   }
   const previous = readStoredRelaySeq(roomId, peerId);
+  const liveKey = relaySeqStorageKey(roomId, peerId);
+  liveRelaySeqByRoomAndPeer.set(liveKey, Math.max(liveRelaySeqByRoomAndPeer.get(liveKey) ?? 0, seq));
   if (seq <= previous) {
     return;
   }
@@ -153,6 +157,10 @@ function readStoredRelaySeq(roomId: string, peerId: string) {
   }
 }
 
+function readLiveRelaySeq(roomId: string, peerId: string) {
+  return liveRelaySeqByRoomAndPeer.get(relaySeqStorageKey(roomId, peerId)) ?? 0;
+}
+
 function buildWebSocketUrl(serverUrl: string, roomId: string, peerId: string, authToken?: string) {
   const url = new URL(serverUrl);
   if (url.protocol === 'https:') {
@@ -167,7 +175,7 @@ function buildWebSocketUrl(serverUrl: string, roomId: string, peerId: string, au
   if (authToken) {
     url.searchParams.set('token', authToken);
   }
-  url.searchParams.set('sinceSeq', '0');
+  url.searchParams.set('sinceSeq', String(readLiveRelaySeq(roomId, peerId)));
   appendClientHints(url);
   return url.toString();
 }

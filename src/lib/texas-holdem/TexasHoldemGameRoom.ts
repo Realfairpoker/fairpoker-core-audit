@@ -67,6 +67,7 @@ export interface TexasHoldemGameRoomEvents {
   winner: (result: WinningResult) => void;
   handPause: (state: HandPauseState | null) => void;
   roundSettings: (round: number, settings: TexasHoldemRoundSettings) => void;
+  pendingRoundSettings: (settings: TexasHoldemRoundSettings) => void;
   transcript: (entry: TranscriptEntry<unknown>) => void;
 }
 
@@ -109,19 +110,19 @@ export interface TexasHoldemStateSnapshot {
   winnersByRound: Map<number, WinningResult>;
   handPauseByRound: Map<number, HandPauseState>;
   settingsByRound: Map<number, TexasHoldemRoundSettings>;
+  pendingRoundSettings?: TexasHoldemRoundSettings;
 }
 
 export const DEFAULT_SMALL_BLIND_AMOUNT = 1;
 export const DEFAULT_BIG_BLIND_AMOUNT = 2;
 export const DEFAULT_AUTO_FOLD_TIMEOUT_SECONDS = 60;
 const MIN_AUTO_FOLD_TIMEOUT_SECONDS = 5;
-const MAX_AUTO_FOLD_TIMEOUT_SECONDS = 300;
 export const DEFAULT_ENCRYPTION_BITS = 256;
 export const DEFAULT_PLANNED_ROUNDS = 10;
 const MIN_PLANNED_ROUNDS = 1;
-const MAX_PLANNED_ROUNDS = 100;
 const REPLAY_AUTO_FOLD_GRACE_MS = 4000;
 const HOLE_KEY_RETRY_DELAYS_MS = [400, 1200, 2600, 5000];
+const BOARD_KEY_RETRY_DELAYS_MS = [500, 1500, 3000, 6000];
 
 enum Stage {
   PRE_FLOP = 0,
@@ -175,8 +176,14 @@ export interface VoidHandVoteEvent {
   approve: boolean;
 }
 
+export interface UpdateSettingsEvent {
+  type: 'action/updateSettings';
+  settings: TexasHoldemRoundSettings;
+}
+
 export type TexasHoldemTableEvent =
   | NewRoundEvent
+  | UpdateSettingsEvent
   | BetEvent
   | FoldEvent
   | AutoFoldEvent
@@ -193,7 +200,7 @@ function normalizeAutoFoldTimeoutSeconds(timeoutSeconds: number | undefined) {
   if (normalized <= 0) {
     return undefined;
   }
-  return Math.max(MIN_AUTO_FOLD_TIMEOUT_SECONDS, Math.min(MAX_AUTO_FOLD_TIMEOUT_SECONDS, normalized));
+  return Math.max(MIN_AUTO_FOLD_TIMEOUT_SECONDS, normalized);
 }
 
 function normalizePlannedRounds(plannedRounds: number | undefined) {
@@ -201,7 +208,7 @@ function normalizePlannedRounds(plannedRounds: number | undefined) {
     return DEFAULT_PLANNED_ROUNDS;
   }
   const normalized = Math.round(plannedRounds);
-  return Math.max(MIN_PLANNED_ROUNDS, Math.min(MAX_PLANNED_ROUNDS, normalized));
+  return Math.max(MIN_PLANNED_ROUNDS, normalized);
 }
 
 function normalizeBlindAmount(amount: number | undefined, fallback: number) {
@@ -254,6 +261,7 @@ class TexasHoldemRound {
   currentTurnStartedAtMs: number = 0;
   currentTurnTimer?: ReturnType<typeof setTimeout>;
   pausedMissingPlayers: string[] = [];
+  disconnectedPlayers: Set<string> = new Set();
   voidVotes: Map<string, boolean> = new Map();
 }
 
@@ -277,7 +285,9 @@ export class TexasHoldemGameRoom {
   private winnersByRound: Map<number, WinningResult> = new Map();
   private handPauseByRound: Map<number, HandPauseState> = new Map();
   private settingsByRound: Map<number, TexasHoldemRoundSettings> = new Map();
+  private pendingRoundSettings?: TexasHoldemRoundSettings;
   private holeKeyRetryTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+  private boardKeyRetryTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
   // GameRoom emits committed events through EventEmitter, which does not wait
   // for async handlers. Queue every table event so turn/street state changes
@@ -318,6 +328,8 @@ export class TexasHoldemGameRoom {
         switch (data.type) {
           case 'newRound':
             return this.handleNewRoundEvent(data, !!replay);
+          case 'action/updateSettings':
+            return this.handleUpdateSettingsEvent(data);
           case 'action/bet':
             return this.handleBetEvent(data, who, !!replay);
           case 'action/fold':
@@ -368,6 +380,17 @@ export class TexasHoldemGameRoom {
         round: this.round,
         settings: normalizedSettings,
         players: playersOrdered,
+      },
+    });
+  }
+
+  async updateRoundSettings(settings: TexasHoldemRoundSettings) {
+    await this.gameRoom.emitEvent({
+      type: 'public',
+      sender: await this.gameRoom.peerIdAsync,
+      data: {
+        type: 'action/updateSettings',
+        settings,
       },
     });
   }
@@ -482,8 +505,7 @@ export class TexasHoldemGameRoom {
       .filter(player => !this.sittingOutPlayers.has(player));
     if (overridePlayers?.length) {
       const canonicalPlayers = overridePlayers.filter((player, index) => (
-        !this.sittingOutPlayers.has(player)
-        && overridePlayers.indexOf(player) === index
+        overridePlayers.indexOf(player) === index
       ));
       if (canonicalPlayers.length > 0) {
         return canonicalPlayers;
@@ -508,6 +530,10 @@ export class TexasHoldemGameRoom {
       clearTimeout(timer);
     }
     this.holeKeyRetryTimers.clear();
+    for (const timer of Array.from(this.boardKeyRetryTimers)) {
+      clearTimeout(timer);
+    }
+    this.boardKeyRetryTimers.clear();
     this.lcm.close();
   }
 
@@ -527,6 +553,7 @@ export class TexasHoldemGameRoom {
       winnersByRound: new Map(this.winnersByRound),
       handPauseByRound: new Map(this.handPauseByRound),
       settingsByRound: new Map(this.settingsByRound),
+      pendingRoundSettings: this.pendingRoundSettings,
     };
   }
 
@@ -747,7 +774,14 @@ export class TexasHoldemGameRoom {
     }
   }
 
-  private async revealBoardCards(round: number, roundData: TexasHoldemRound, visibleCount: 3 | 4 | 5, replay?: boolean, forceResend = false) {
+  private async revealBoardCards(
+    round: number,
+    roundData: TexasHoldemRound,
+    visibleCount: 3 | 4 | 5,
+    replay?: boolean,
+    forceResend = false,
+    allowRetry = true,
+  ) {
     const currentVisibleCount = this.visibleBoardCountForStage(roundData.stage);
     const currentBoardCount = this.boardByRound.get(round)?.length ?? 0;
     if (!forceResend && visibleCount <= currentVisibleCount && currentBoardCount >= visibleCount) {
@@ -767,10 +801,36 @@ export class TexasHoldemGameRoom {
         this.updateVisibleBoard(round, roundData, board as Board);
       }
     });
+    if (allowRetry) {
+      this.scheduleBoardKeyRetry(round, roundData, visibleCount);
+    }
+  }
+
+  private scheduleBoardKeyRetry(round: number, roundData: TexasHoldemRound, visibleCount: 3 | 4 | 5, attempt = 0) {
+    const delayMs = BOARD_KEY_RETRY_DELAYS_MS[attempt];
+    if (delayMs === undefined || roundData.result || (this.boardByRound.get(round)?.length ?? 0) >= visibleCount) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.boardKeyRetryTimers.delete(timer);
+      if (roundData.result || (this.boardByRound.get(round)?.length ?? 0) >= visibleCount) {
+        return;
+      }
+      void this.revealBoardCards(round, roundData, visibleCount, false, true, false)
+        .catch(error => {
+          console.warn(`Unable to retry public board key delivery for round ${round}.`, error);
+        })
+        .finally(() => {
+          this.scheduleBoardKeyRetry(round, roundData, visibleCount, attempt + 1);
+        });
+    }, delayMs);
+    this.boardKeyRetryTimers.add(timer);
   }
 
   private async handleNewRoundEvent(e: NewRoundEvent, replay: boolean) {
     const normalizedSettings = normalizeRoundSettings(e.settings, e.round);
+    this.pendingRoundSettings = normalizedSettings;
+    this.emitter.emit('pendingRoundSettings', normalizedSettings);
     for (let player of e.players) {
       const fund = this.funds.get(player);
       if (!fund || fund < normalizedSettings.bigBlindAmount!) {
@@ -812,6 +872,13 @@ export class TexasHoldemGameRoom {
     this.emitWhoseTurn(e.round, roundData, playerNextToBb, {
       callAmount: e.players.length === 2 ? bigBlindAmount - smallBlindAmount : bigBlindAmount,
     }, replay);
+  }
+
+  private handleUpdateSettingsEvent(e: UpdateSettingsEvent) {
+    const fallbackStartRound = this.round || 1;
+    const normalizedSettings = normalizeRoundSettings(e.settings, fallbackStartRound);
+    this.pendingRoundSettings = normalizedSettings;
+    this.emitter.emit('pendingRoundSettings', normalizedSettings);
   }
 
   private async dealInitialHoleCards(round: number, players: string[]) {
@@ -910,12 +977,31 @@ export class TexasHoldemGameRoom {
   private async handleReturnToTableEvent(e: ReturnToTableEvent, who: string, replay: boolean) {
     const roundNo = typeof e.round === 'number' ? e.round : undefined;
     const round = roundNo ? this.dataByRounds.get(roundNo) : undefined;
+    const players = round ? await round.playersOrdered.promise : [];
+    const returnOnlyForNextHand = Boolean(
+      round
+      && !round.result
+      && players.includes(who)
+      && !round.foldPlayers.has(who)
+    );
+    if (returnOnlyForNextHand && round && !replay) {
+      await this.resendVisibleCardsForReturnedPlayer(roundNo!, round, who);
+    }
+    if (returnOnlyForNextHand && round) {
+      this.sittingOutPlayers.add(who);
+      if (round.disconnectedPlayers.has(who) && !round.pausedMissingPlayers.includes(who)) {
+        round.pausedMissingPlayers.push(who);
+        this.clearTurnTimer(round);
+        this.publishPauseState(roundNo!, round);
+      }
+      return;
+    }
     if (round?.foldPlayers.has(who)) {
       await this.revealFoldedPlayerRecoveryCards(roundNo!, round, who, replay);
     }
     this.sittingOutPlayers.delete(who);
     if (round?.pausedMissingPlayers.includes(who)) {
-      this.removeReturnedPlayerFromPause(roundNo!, round, who);
+      this.removeReturnedPlayerFromPause(roundNo!, round, who, !returnOnlyForNextHand);
     }
     if (round && !round.result && !replay) {
       await this.resendVisibleCardsForReturnedPlayer(roundNo!, round, who);
@@ -939,7 +1025,7 @@ export class TexasHoldemGameRoom {
   }
 
   private refreshPauseState(roundNo: number, roundData: TexasHoldemRound) {
-    void roundData.playersOrdered.promise.then(players => {
+    void roundData.playersOrdered.promise.then(async players => {
       if (roundData.result) {
         this.clearPauseState(roundNo, roundData);
         return;
@@ -949,19 +1035,27 @@ export class TexasHoldemGameRoom {
         !connected.has(player)
         && !roundData.foldPlayers.has(player)
       );
-
-      if (missingPlayers.length === 0) {
+      missingPlayers.forEach(player => roundData.disconnectedPlayers.add(player));
+      const disconnectedPlayers = players.filter(player =>
+        roundData.disconnectedPlayers.has(player)
+        && !roundData.foldPlayers.has(player)
+      );
+      if (disconnectedPlayers.length === 0 && missingPlayers.length === 0) {
         this.clearPauseState(roundNo, roundData);
         return;
       }
 
-      roundData.pausedMissingPlayers = missingPlayers;
+      roundData.pausedMissingPlayers = Array.from(new Set([...missingPlayers, ...disconnectedPlayers]));
       this.clearTurnTimer(roundData);
+      const myPeerId = await this.gameRoom.peerIdAsync;
+      if (connected.has(myPeerId) && disconnectedPlayers.includes(myPeerId)) {
+        await this.resendVisibleCardsForReturnedPlayer(roundNo, roundData, myPeerId);
+      }
       this.publishPauseState(roundNo, roundData);
     });
   }
 
-  private clearPauseState(roundNo: number, roundData: TexasHoldemRound) {
+  private clearPauseState(roundNo: number, roundData: TexasHoldemRound, resumePlay = true) {
     if (!roundData.pausedMissingPlayers.length && !this.handPauseByRound.has(roundNo)) {
       return;
     }
@@ -969,6 +1063,9 @@ export class TexasHoldemGameRoom {
     roundData.voidVotes.clear();
     this.handPauseByRound.delete(roundNo);
     this.emitter.emit('handPause', null);
+    if (!resumePlay) {
+      return;
+    }
     if (roundData.currentTurn && !roundData.result) {
       const actionMeta = this.whoseTurnByRound.get(roundNo);
       this.emitWhoseTurn(
@@ -981,14 +1078,65 @@ export class TexasHoldemGameRoom {
     void this.resumePendingCardDisclosure(roundNo, roundData);
   }
 
-  private removeReturnedPlayerFromPause(roundNo: number, roundData: TexasHoldemRound, who: string) {
+  private removeReturnedPlayerFromPause(roundNo: number, roundData: TexasHoldemRound, who: string, resumeWhenCleared = true) {
     roundData.pausedMissingPlayers = roundData.pausedMissingPlayers.filter(player => player !== who);
     roundData.voidVotes.delete(who);
     if (roundData.pausedMissingPlayers.length === 0) {
-      this.clearPauseState(roundNo, roundData);
+      this.clearPauseState(roundNo, roundData, resumeWhenCleared);
       return;
     }
     this.publishPauseState(roundNo, roundData);
+  }
+
+  private async foldReturnedPlayerIntoRail(roundNo: number, roundData: TexasHoldemRound, who: string, replay: boolean) {
+    if (roundData.result || roundData.foldPlayers.has(who)) {
+      return;
+    }
+    const wasCurrentTurn = roundData.currentTurn === who;
+    if (wasCurrentTurn) {
+      this.clearTurnTimer(roundData);
+      roundData.currentTurn = null;
+    }
+    roundData.foldPlayers.add(who);
+    this.emitter.emit('fold', roundNo, who);
+    await this.revealFoldedPlayerRecoveryCards(roundNo, roundData, who, replay);
+
+    const playersLeft = (await roundData.playersOrdered.promise).filter(p => !roundData.foldPlayers.has(p));
+    if (playersLeft.length === 1) {
+      const winner = playersLeft[0];
+      const result: LastOneWins = {
+        how: 'LastOneWins',
+        round: roundNo,
+        winner,
+      };
+      roundData.result = result;
+      this.clearTurnTimer(roundData);
+      this.winnersByRound.set(roundNo, result);
+      this.emitter.emit('winner', result);
+      const totalPotAmount = Array.from(roundData.pot.values()).reduce((m1, m2) => m1 + m2, 0);
+      const newFundOfWinner = (this.funds.get(winner) ?? 0) + totalPotAmount;
+      this.updateFundOfPlayer(winner, newFundOfWinner);
+      return;
+    }
+
+    if (roundData.pausedMissingPlayers.length > 0) {
+      this.publishPauseState(roundNo, roundData);
+      return;
+    }
+    if (wasCurrentTurn) {
+      await this.continueUnlessAllSet(roundNo, roundData, who, replay);
+      return;
+    }
+    if (roundData.currentTurn) {
+      const actionMeta = this.whoseTurnByRound.get(roundNo);
+      this.emitWhoseTurn(
+        roundNo,
+        roundData,
+        roundData.currentTurn,
+        actionMeta ? {callAmount: actionMeta.callAmount} : undefined,
+        replay,
+      );
+    }
   }
 
   private async resumePendingCardDisclosure(roundNo: number, roundData: TexasHoldemRound, skipBoardReveal = false) {
@@ -1062,6 +1210,9 @@ export class TexasHoldemGameRoom {
   }
 
   private voidHand(roundNo: number, roundData: TexasHoldemRound, approvals: string[]) {
+    for (const player of roundData.pausedMissingPlayers) {
+      this.sittingOutPlayers.add(player);
+    }
     const result: VoidedHandResult = {
       how: 'Voided',
       round: roundNo,

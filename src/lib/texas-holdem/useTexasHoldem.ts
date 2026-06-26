@@ -508,6 +508,9 @@ function useTranscript() {
 
 function useRoundSettings(round: number | undefined) {
   const [settingsPerRound, setSettingsPerRound] = useState<Map<number, TexasHoldemRoundSettings>>(() => TexasHoldem.getStateSnapshot().settingsByRound);
+  const [pendingSettings, setPendingSettings] = useState<TexasHoldemRoundSettings | undefined>(
+    () => TexasHoldem.getStateSnapshot().pendingRoundSettings,
+  );
 
   useEffect(() => {
     const roundSettingsListener: TexasHoldemGameRoomEvents['roundSettings'] = (round, settings) => {
@@ -517,13 +520,18 @@ function useRoundSettings(round: number | undefined) {
         return next;
       });
     };
+    const pendingRoundSettingsListener: TexasHoldemGameRoomEvents['pendingRoundSettings'] = (settings) => {
+      setPendingSettings(settings);
+    };
     TexasHoldem.listener.on('roundSettings', roundSettingsListener);
+    TexasHoldem.listener.on('pendingRoundSettings', pendingRoundSettingsListener);
     return () => {
       TexasHoldem.listener.off('roundSettings', roundSettingsListener);
+      TexasHoldem.listener.off('pendingRoundSettings', pendingRoundSettingsListener);
     };
   }, []);
 
-  return useMemo(() => round ? settingsPerRound.get(round) : undefined, [round, settingsPerRound]);
+  return useMemo(() => round ? settingsPerRound.get(round) : pendingSettings, [pendingSettings, round, settingsPerRound]);
 }
 
 function useHandPause(round: number | undefined) {
@@ -646,6 +654,9 @@ export default function useTexasHoldem() {
       participants: settings?.participants,
     });
   }, []);
+  const updateRoundSettings = useCallback(async (settings: TexasHoldemRoundSettings) => {
+    await TexasHoldem.updateRoundSettings(settings);
+  }, []);
   const canStartNewRound = useCallback(() => TexasHoldem.canStartNewRound(), []);
   const voteToVoidHand = useCallback(async (approve: boolean) => {
     if (!currentRound) {
@@ -725,6 +736,7 @@ export default function useTexasHoldem() {
       returnToTable,
       openRegistration,
       voteToVoidHand,
+      updateRoundSettings,
     },
   };
 }
