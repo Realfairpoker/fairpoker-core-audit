@@ -1,6 +1,7 @@
 import {canonicalJson} from "./canonicalJson";
 import {isSignedGameEvent, SignedGameEvent, verifySignedGameEvent} from "./eventSigning";
 import {sha256Hex} from "./hash";
+import {transcriptFailure, TranscriptFailureCode, FairnessFailure, FairnessFailureCode} from "./transcriptFailureCodes";
 
 export const GENESIS_TRANSCRIPT_HASH = 'sha256:genesis';
 
@@ -15,6 +16,7 @@ export interface TranscriptEntry<T> {
   signed: boolean;
   signatureValid?: boolean;
   signatureFailureReason?: string;
+  signatureFailureReasonCode?: string;
   payloadHash: string;
   wireEvent: T | SignedGameEvent<T>;
 }
@@ -30,6 +32,17 @@ export interface TranscriptVerificationResult {
   finalHash?: string;
   failedIndex?: number;
   reason?: string;
+  reasonCode?: FairnessFailureCode;
+}
+
+function failureResult(code: TranscriptFailureCode, detail: string, failedIndex?: number): TranscriptVerificationResult {
+  const failure: FairnessFailure = transcriptFailure(code, detail);
+  return {
+    ok: false,
+    failedIndex,
+    reason: failure.detail,
+    reasonCode: failure.code,
+  };
 }
 
 export class TranscriptRecorder<T> {
@@ -72,6 +85,7 @@ export class TranscriptRecorder<T> {
       signed: isSignedGameEvent<T>(input.wireEvent),
       ...(signatureCheck ? { signatureValid: signatureCheck.ok } : {}),
       ...(signatureCheck?.reason ? { signatureFailureReason: signatureCheck.reason } : {}),
+      ...(signatureCheck?.reasonCode ? { signatureFailureReasonCode: signatureCheck.reasonCode } : {}),
       payloadHash,
       wireEvent: input.wireEvent,
     };
@@ -108,16 +122,21 @@ export async function verifyTranscript<T>(
   for (let i = 0; i < transcript.entries.length; i++) {
     const entry = transcript.entries[i];
     if (entry.index !== i) {
-      return { ok: false, failedIndex: i, reason: `Expected index ${i}, got ${entry.index}` };
+      return failureResult('TR-INDEX-MISMATCH', `Expected index ${i}, got ${entry.index}`, i);
     }
     if (entry.previousHash !== previousHash) {
-      return { ok: false, failedIndex: i, reason: 'Previous hash mismatch' };
+      return failureResult('TR-PREV-HASH-MISMATCH', 'Previous hash mismatch', i);
     }
 
     if (isSignedGameEvent<T>(entry.wireEvent)) {
       const verification = await verifySignedGameEvent(entry.wireEvent, entry.transportSender);
       if (!verification.ok) {
-        return { ok: false, failedIndex: i, reason: verification.reason };
+        return {
+          ok: false,
+          failedIndex: i,
+          reason: verification.reason,
+          reasonCode: verification.reasonCode ?? 'EV-UNKNOWN',
+        };
       }
     }
 
@@ -127,14 +146,18 @@ export async function verifyTranscript<T>(
       previousHash,
     }))}`;
     if (eventHash !== recomputedHash) {
-      return { ok: false, failedIndex: i, reason: 'Event hash mismatch' };
+      return failureResult('TR-EVENT-HASH-MISMATCH', 'Event hash mismatch', i);
     }
 
     previousHash = eventHash;
   }
 
   if (transcript.finalHash !== previousHash) {
-    return { ok: false, reason: 'Final hash mismatch' };
+    return {
+      ok: false,
+      reasonCode: 'TR-FINAL-HASH-MISMATCH',
+      reason: transcriptFailure('TR-FINAL-HASH-MISMATCH').detail,
+    };
   }
 
   return {
