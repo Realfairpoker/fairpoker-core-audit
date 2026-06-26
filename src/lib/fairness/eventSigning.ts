@@ -1,7 +1,6 @@
 import {canonicalJson} from "./canonicalJson";
 import {base64UrlToBytes, bytesToBase64Url, utf8Bytes} from "./encoding";
 import {sha256Base64Url, sha256Hex} from "./hash";
-import {signedEventFailure, SignedEventFailureCode} from "./transcriptFailureCodes";
 
 export const SIGNED_EVENT_KIND = 'fairpoker.signed-event.v1';
 
@@ -39,7 +38,6 @@ export interface EventSigner {
 export interface SignedEventVerification {
   ok: boolean;
   reason?: string;
-  reasonCode?: SignedEventFailureCode;
 }
 
 export function isSignedGameEvent<T>(value: unknown): value is SignedGameEvent<T> {
@@ -127,47 +125,33 @@ export async function verifySignedGameEvent<T>(
   transportSender: string,
 ): Promise<SignedEventVerification> {
   if (event.sender !== transportSender) {
-    const failure = signedEventFailure(
-      'EV-SENDER-MISMATCH',
-      `Envelope sender ${event.sender} does not match transport sender ${transportSender}`,
-    );
     return {
       ok: false,
-      reason: failure.detail,
-      reasonCode: failure.code,
+      reason: `Envelope sender ${event.sender} does not match transport sender ${transportSender}`,
     };
   }
 
   const derivedPeerId = await derivePeerIdFromSigningPublicKey(event.publicKeyJwk);
   if (derivedPeerId !== event.sender) {
-    const failure = signedEventFailure(
-      'EV-PUBLIC-KEY-MISMATCH',
-      `Signing key derives peer id ${derivedPeerId}, not ${event.sender}`,
-    );
     return {
       ok: false,
-      reason: failure.detail,
-      reasonCode: failure.code,
+      reason: `Signing key derives peer id ${derivedPeerId}, not ${event.sender}`,
     };
   }
 
   const actualFingerprint = await fingerprintPublicKey(event.publicKeyJwk);
   if (actualFingerprint !== event.publicKeyFingerprint) {
-    const failure = signedEventFailure('EV-FINGERPRINT-MISMATCH');
     return {
       ok: false,
-      reason: failure.detail,
-      reasonCode: failure.code,
+      reason: 'Public key fingerprint mismatch',
     };
   }
 
   const actualPayloadHash = `sha256:${await sha256Hex(canonicalJson(event.payload))}`;
   if (actualPayloadHash !== event.payloadHash) {
-    const failure = signedEventFailure('EV-PAYLOAD-HASH-MISMATCH');
     return {
       ok: false,
-      reason: failure.detail,
-      reasonCode: failure.code,
+      reason: 'Payload hash mismatch',
     };
   }
 
@@ -188,12 +172,5 @@ export async function verifySignedGameEvent<T>(
 
   return signatureValid
     ? { ok: true }
-    : (() => {
-      const failure = signedEventFailure('EV-SIGNATURE-MISMATCH');
-      return {
-        ok: false,
-        reason: failure.detail,
-        reasonCode: failure.code,
-      };
-    })();
+    : { ok: false, reason: 'Signature verification failed' };
 }
