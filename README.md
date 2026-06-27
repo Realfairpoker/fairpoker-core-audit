@@ -15,6 +15,31 @@ This repository is used as a public evidence record for Fair Poker owned core
 fairness code: dealing, shuffling, encryption, decryption, signed transcripts,
 hash-chain replay, release metadata, and local verification.
 
+## Verify It Yourself
+
+You do not have to trust this README. Verify the two core claims directly:
+
+1. **The running client is built from this public source.** Confirm the table
+   client's IPFS CID equals the Game client CID in
+   [`source/release.json`](https://fairpoker.app/source/release.json), then
+   download the source package and check that its archive SHA256 and
+   `sourceFingerprint` match. Step-by-step guide:
+   [fairpoker.app/verify-guide.html](https://fairpoker.app/verify-guide.html).
+
+2. **Each hand reconciles.** Download a hand's signed transcript from the
+   table's security panel and replay it locally:
+
+   ```bash
+   npm ci
+   npm run verify:transcript -- /path/to/transcript.json
+   ```
+
+   A passing result means the hash-chain, event order, signatures, bets, pot,
+   and outcome all reconcile on your own machine.
+
+Canonical release values live in [`ai.json`](https://fairpoker.app/ai.json) and
+`./evidence/release.json`; the full method is documented in the sections below.
+
 ## Third-Party Software Security Signal
 
 Snyk is an international developer security platform for code, open-source

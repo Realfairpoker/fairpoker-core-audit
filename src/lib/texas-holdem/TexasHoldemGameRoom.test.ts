@@ -533,8 +533,16 @@ describe('TexasHoldemGameRoom', () => {
         await Promise.resolve();
       }
 
-      expect(mockGameRoom.lastEventEmitted.data.type).toBe('newRound');
+      // The disconnected current player is never auto-folded. After the grace
+      // window, the present players auto-consent to void instead — the fallback
+      // that stops a paused hand from hanging forever. A's auto-cast vote is the
+      // last event emitted; no fold was ever produced.
       expect(foldEvents).toEqual([]);
+      expect(mockGameRoom.lastEventEmitted.data).toMatchObject({
+        type: 'action/voidHandVote',
+        round: 1,
+        approve: true,
+      });
     } finally {
       jest.useRealTimers();
     }
@@ -1127,7 +1135,7 @@ describe('TexasHoldemGameRoom', () => {
     expect(fundEvents.filter(([, , player]) => player === 'B').pop()?.[0]).toBe(100);
   });
 
-  test('returning player stays paused for void voting instead of resuming the hand', async () => {
+  test('a reconnecting missing player resumes the paused hand', async () => {
     const mockGameRoom = new MockGameRoom();
     mockGameRoom.peerIdDeferred.resolve('A');
     const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
@@ -1150,6 +1158,7 @@ describe('TexasHoldemGameRoom', () => {
     });
     await new Promise(r => setTimeout(r, 0));
 
+    // C drops mid-hand: the hand pauses for the missing player.
     mockMentalPokerGameRoom.members = ['A', 'B'];
     mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
     await new Promise(r => setTimeout(r, 0));
@@ -1159,25 +1168,21 @@ describe('TexasHoldemGameRoom', () => {
       missingPlayers: ['C'],
     });
 
-    mockGameRoom.listener.emit('event', {
-      type: 'public',
-      sender: 'C',
-      data: {
-        type: 'action/returnToTable',
-        round: 1,
-      },
-    }, 'C', false);
+    // C comes back online: the hand resumes instead of staying stuck.
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    mockMentalPokerGameRoom.listener.emit('members', ['A', 'B', 'C']);
     await new Promise(r => setTimeout(r, 0));
 
-    expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
-      round: 1,
-      missingPlayers: ['C'],
-    });
+    expect(pauseEvents[pauseEvents.length - 1]).toBeNull();
+    const roundData = (texasHoldemGameRoom as any).dataByRounds.get(1);
+    expect(roundData.pausedMissingPlayers).toEqual([]);
+    expect(roundData.disconnectedPlayers.has('C')).toBe(false);
     expect(foldEvents).toEqual([]);
+    // Turn is handed back to whoever was due to act before the pause.
     expect(turnEvents[turnEvents.length - 1]).toEqual([1, 'C', {callAmount: 2}]);
   });
 
-  test('reconnected missing player is moved to rail instead of resuming the hand', async () => {
+  test('a reconnecting missing player recovers the board on resume', async () => {
     const mockGameRoom = new MockGameRoom();
     mockGameRoom.peerIdDeferred.resolve('C');
     const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
@@ -1185,12 +1190,8 @@ describe('TexasHoldemGameRoom', () => {
     const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom);
     const pauseEvents: any[] = [];
     const foldEvents: string[] = [];
-    const turnEvents: Array<[number, string | null, {callAmount: number} | undefined]> = [];
     texasHoldemGameRoom.listener.on('handPause', state => pauseEvents.push(state));
     texasHoldemGameRoom.listener.on('fold', (_round, who) => foldEvents.push(who));
-    texasHoldemGameRoom.listener.on('whoseTurn', (round, whose, meta) => {
-      turnEvents.push([round, whose, meta]);
-    });
 
     await texasHoldemGameRoom.startNewRound({
       initialFundAmount: 100,
@@ -1201,6 +1202,7 @@ describe('TexasHoldemGameRoom', () => {
     await (texasHoldemGameRoom as any).revealBoardCards(1, roundData, 3, false);
     mockMentalPokerGameRoom.shownCards = [];
 
+    // Local player C loses the peer list, then regains it (refresh / blip).
     mockMentalPokerGameRoom.members = ['A', 'B'];
     mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
     await new Promise(r => setTimeout(r, 0));
@@ -1214,15 +1216,57 @@ describe('TexasHoldemGameRoom', () => {
     mockMentalPokerGameRoom.listener.emit('members', ['A', 'B', 'C']);
     await new Promise(r => setTimeout(r, 0));
 
-    expect(pauseEvents[pauseEvents.length - 1]).toMatchObject({
-      round: 1,
-      missingPlayers: ['C'],
-    });
+    // Hand resumes and the board cards are re-delivered to the returned player.
+    expect(pauseEvents[pauseEvents.length - 1]).toBeNull();
+    expect(roundData.pausedMissingPlayers).toEqual([]);
     expect(foldEvents).toEqual([]);
-    expect(turnEvents[turnEvents.length - 1]).toEqual([1, 'C', {callAmount: 2}]);
     expect(mockMentalPokerGameRoom.shownCards).toEqual(
       expect.arrayContaining([[1, 0], [1, 1], [1, 2]])
     );
+  });
+
+  test('auto-voids a paused hand after the grace period and refunds the pot', async () => {
+    const mockGameRoom = new MockGameRoom();
+    mockGameRoom.peerIdDeferred.resolve('A');
+    const mockMentalPokerGameRoom = new MockMentalPokerGameRoom();
+    mockMentalPokerGameRoom.members = ['A', 'B', 'C'];
+    const texasHoldemGameRoom = new TexasHoldemGameRoom(mockGameRoom, mockMentalPokerGameRoom, {
+      pauseGraceVoidMs: 40,
+    });
+
+    const winnerEvents: WinningResult[] = [];
+    const fundEvents: Array<[number, number | undefined, string]> = [];
+    texasHoldemGameRoom.listener.on('winner', result => winnerEvents.push(result));
+    texasHoldemGameRoom.listener.on('fund', (fund, prev, whose) => fundEvents.push([fund, prev, whose]));
+
+    await texasHoldemGameRoom.startNewRound({ initialFundAmount: 100 });
+    await new Promise(r => setTimeout(r, 0));
+
+    // C vanishes and never returns.
+    mockMentalPokerGameRoom.members = ['A', 'B'];
+    mockMentalPokerGameRoom.listener.emit('members', ['A', 'B']);
+    await new Promise(r => setTimeout(r, 0));
+    expect(winnerEvents).toEqual([]);
+
+    // Past the grace period, the present player (A) auto-consents to void; the
+    // other present player (B) does likewise on its own client.
+    await new Promise(r => setTimeout(r, 90));
+    mockGameRoom.listener.emit('event', {
+      type: 'public',
+      sender: 'B',
+      data: { type: 'action/voidHandVote', round: 1, approve: true },
+    }, 'B', false);
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(winnerEvents).toEqual([{
+      how: 'Voided',
+      round: 1,
+      missingPlayers: ['C'],
+      approvals: ['A', 'B'],
+    }]);
+    // Pot refunded: both present players are back to their starting stack.
+    expect(fundEvents.filter(([, , p]) => p === 'A').pop()?.[0]).toBe(100);
+    expect(fundEvents.filter(([, , p]) => p === 'B').pop()?.[0]).toBe(100);
   });
 
   test('returning player receives current hand keys again', async () => {

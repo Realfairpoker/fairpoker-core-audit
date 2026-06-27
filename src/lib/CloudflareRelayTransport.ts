@@ -54,6 +54,12 @@ type RelayCapabilities = {
 
 const liveRelaySeqByRoomAndPeer = new Map<string, number>();
 
+// Auto-reconnect backoff bounds. The relay WebSocket is the only live link to the
+// table, so an unexpected close (refresh, sleep/wake, Wi-Fi switch, worker
+// redeploy) must self-heal instead of leaving the player stranded.
+const BASE_RECONNECT_DELAY_MS = 500;
+const MAX_RECONNECT_DELAY_MS = 10000;
+
 export type WorkerPlayerStatus = 'active' | 'watching' | 'sittingOut' | 'timedOut' | 'offline';
 
 export type WorkerRoomPlayerState = {
@@ -235,9 +241,14 @@ function publishRoomState(roomState: WorkerRoomState | undefined) {
 }
 
 export default class CloudflareRelayTransport {
-  private readonly socket: WebSocket;
+  private socket: WebSocket;
   private readonly peerId: string;
   private readonly roomId: string;
+  private readonly serverUrl: string;
+  private readonly authToken?: string;
+  private userClosed = false;
+  private reconnectAttempts = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
   private capabilities: RelayCapabilities = {};
   private readonly connected = new Set<string>();
   private readonly listeners: {
@@ -256,21 +267,66 @@ export default class CloudflareRelayTransport {
   constructor(options: RelayTransportOptions) {
     this.peerId = options.peerId;
     this.roomId = options.roomId;
-    this.socket = new WebSocket(buildWebSocketUrl(
-      options.serverUrl,
-      options.roomId,
-      options.peerId,
-      options.authToken,
-    ), buildTokenSubprotocols(options.authToken));
+    this.serverUrl = options.serverUrl;
+    this.authToken = options.authToken;
+    this.socket = this.openSocket();
+  }
 
-    this.socket.addEventListener('message', (event) => this.handleServerMessage(event.data));
-    this.socket.addEventListener('error', () => {
+  // Opens (or re-opens) the relay WebSocket and wires its lifecycle. On an
+  // unexpected close we reconnect with capped exponential backoff, reusing the
+  // same peerId and the stored sinceSeq so the worker replays everything missed
+  // during the gap. The mesh re-fires `ready`/`peerConnected` on the fresh
+  // welcome, which the upper layers already treat idempotently.
+  private openSocket(): WebSocket {
+    const socket = new WebSocket(buildWebSocketUrl(
+      this.serverUrl,
+      this.roomId,
+      this.peerId,
+      this.authToken,
+    ), buildTokenSubprotocols(this.authToken));
+
+    socket.addEventListener('message', (event) => this.handleServerMessage(event.data));
+    socket.addEventListener('error', () => {
       this.emit('error', new Error('Cloudflare relay WebSocket error.'));
     });
-    this.socket.addEventListener('close', () => {
+    socket.addEventListener('close', (event) => {
       this.connected.clear();
       this.emit('close');
+      // Only reconnect on UNEXPECTED drops (e.g. 1006 network loss). A normal
+      // closure (code 1000) is the relay intentionally replacing this socket —
+      // most importantly "Duplicate player session replaced", sent when a newer
+      // session for the same peerId connects (another tab, or a hot-reloaded
+      // client). Reconnecting then would fight the newer session and make both
+      // flap to "offline". A user-initiated close() is also skipped.
+      const intentionalClosure = (event as CloseEvent | undefined)?.code === 1000;
+      if (!this.userClosed && !intentionalClosure) {
+        this.scheduleReconnect();
+      }
     });
+    return socket;
+  }
+
+  private scheduleReconnect() {
+    if (this.userClosed || this.reconnectTimer !== undefined) {
+      return;
+    }
+    const attempt = this.reconnectAttempts;
+    this.reconnectAttempts += 1;
+    const ceiling = Math.min(
+      MAX_RECONNECT_DELAY_MS,
+      BASE_RECONNECT_DELAY_MS * 2 ** Math.min(attempt, 6),
+    );
+    // Jitter in [ceiling/2, ceiling] avoids a thundering-herd reconnect when many
+    // clients drop together (e.g., a worker redeploy).
+    const delay = ceiling / 2 + Math.random() * (ceiling / 2);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (this.userClosed) {
+        return;
+      }
+      this.socket = this.openSocket();
+    }, delay);
+    (this.reconnectTimer as unknown as {unref?: () => void}).unref?.();
   }
 
   get localPeerId() {
@@ -312,6 +368,11 @@ export default class CloudflareRelayTransport {
   }
 
   close() {
+    this.userClosed = true;
+    if (this.reconnectTimer !== undefined) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     this.socket.close();
   }
 
@@ -329,6 +390,9 @@ export default class CloudflareRelayTransport {
     }
 
     if (message.type === 'welcome') {
+      // A full authenticated session was established; reset backoff so the next
+      // unexpected drop starts retrying quickly again.
+      this.reconnectAttempts = 0;
       this._localPeerId = message.peerId;
       this.capabilities = message.capabilities ?? {};
       publishRelaySummary(message.relay);

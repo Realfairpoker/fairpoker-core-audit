@@ -124,6 +124,13 @@ const MIN_PLANNED_ROUNDS = 1;
 const REPLAY_AUTO_FOLD_GRACE_MS = 4000;
 const HOLE_KEY_RETRY_DELAYS_MS = [400, 1200, 2600, 5000];
 const BOARD_KEY_RETRY_DELAYS_MS = [500, 1500, 3000, 6000];
+// How long a hand may stay paused waiting for a missing player to come back
+// before the still-present players automatically consent to void it (refunding
+// the pot). This bounds the worst case where a player closes the browser and
+// never returns, so a hand can no longer hang forever. Manual void voting still
+// works immediately; this is only the fallback. A reconnect within this window
+// resumes the hand normally.
+export const PAUSE_GRACE_VOID_MS = 45000;
 
 enum Stage {
   PRE_FLOP = 0,
@@ -264,6 +271,7 @@ class TexasHoldemRound {
   pausedMissingPlayers: string[] = [];
   disconnectedPlayers: Set<string> = new Set();
   voidVotes: Map<string, boolean> = new Map();
+  pauseGraceTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class TexasHoldemGameRoom {
@@ -289,6 +297,7 @@ export class TexasHoldemGameRoom {
   private pendingRoundSettings?: TexasHoldemRoundSettings;
   private holeKeyRetryTimers: Set<ReturnType<typeof setTimeout>> = new Set();
   private boardKeyRetryTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+  private readonly pauseGraceVoidMs: number;
 
   // GameRoom emits committed events through EventEmitter, which does not wait
   // for async handlers. Queue every table event so turn/street state changes
@@ -298,9 +307,11 @@ export class TexasHoldemGameRoom {
   constructor(
     gameRoom: GameRoomLike<TexasHoldemTableEvent | any>,
     mentalPokerGameRoom: MentalPokerGameRoomLike,
+    options?: { pauseGraceVoidMs?: number },
   ) {
     this.gameRoom = gameRoom;
     this.mentalPokerGameRoom = mentalPokerGameRoom;
+    this.pauseGraceVoidMs = options?.pauseGraceVoidMs ?? PAUSE_GRACE_VOID_MS;
 
     this.propagate('connected');
     this.propagate('status');
@@ -534,6 +545,7 @@ export class TexasHoldemGameRoom {
   close() {
     for (const roundData of Array.from(this.dataByRounds.values())) {
       this.clearTurnTimer(roundData);
+      this.clearPauseGraceTimer(roundData);
     }
     for (const timer of Array.from(this.holeKeyRetryTimers)) {
       clearTimeout(timer);
@@ -1039,35 +1051,59 @@ export class TexasHoldemGameRoom {
   private refreshPauseState(roundNo: number, roundData: TexasHoldemRound) {
     void roundData.playersOrdered.promise.then(async players => {
       if (roundData.result) {
+        this.clearPauseGraceTimer(roundData);
         this.clearPauseState(roundNo, roundData);
         return;
       }
       const connected = new Set(this.mentalPokerGameRoom.members);
+
+      // A player who is back online must no longer count as disconnected.
+      // `disconnectedPlayers` used to be add-only, so a single refresh or brief
+      // network blip kept the hand paused forever even after the player returned.
+      // Now we drop reconnected players from the set and resend their still-private
+      // cards, so the hand resumes the moment everyone is back.
+      const reconnectedPlayers = players.filter(player =>
+        roundData.disconnectedPlayers.has(player) && connected.has(player)
+      );
+      for (const player of reconnectedPlayers) {
+        roundData.disconnectedPlayers.delete(player);
+      }
+
       const missingPlayers = players.filter(player =>
         !connected.has(player)
         && !roundData.foldPlayers.has(player)
       );
       missingPlayers.forEach(player => roundData.disconnectedPlayers.add(player));
-      const disconnectedPlayers = players.filter(player =>
+
+      // Re-deliver each returned player's hole cards and the current board. Other
+      // present peers run this too, so a reconnecting player collects every peer's
+      // decrypt-key share again. Re-sending these keys is idempotent
+      // (see dealInitialHoleCards / revealBoardCards).
+      for (const player of reconnectedPlayers) {
+        if (!roundData.result) {
+          await this.resendVisibleCardsForReturnedPlayer(roundNo, roundData, player);
+        }
+      }
+
+      const stillMissing = players.filter(player =>
         roundData.disconnectedPlayers.has(player)
         && !roundData.foldPlayers.has(player)
       );
-      if (disconnectedPlayers.length === 0 && missingPlayers.length === 0) {
+
+      if (stillMissing.length === 0) {
+        this.clearPauseGraceTimer(roundData);
         this.clearPauseState(roundNo, roundData);
         return;
       }
 
-      roundData.pausedMissingPlayers = Array.from(new Set([...missingPlayers, ...disconnectedPlayers]));
+      roundData.pausedMissingPlayers = stillMissing;
       this.clearTurnTimer(roundData);
-      const myPeerId = await this.gameRoom.peerIdAsync;
-      if (connected.has(myPeerId) && disconnectedPlayers.includes(myPeerId)) {
-        await this.resendVisibleCardsForReturnedPlayer(roundNo, roundData, myPeerId);
-      }
       this.publishPauseState(roundNo, roundData);
     });
   }
 
   private clearPauseState(roundNo: number, roundData: TexasHoldemRound, resumePlay = true) {
+    this.clearPauseGraceTimer(roundData);
     if (!roundData.pausedMissingPlayers.length && !this.handPauseByRound.has(roundNo)) {
       return;
     }
@@ -1198,7 +1234,48 @@ export class TexasHoldemGameRoom {
       };
       this.handPauseByRound.set(roundNo, state);
       this.emitter.emit('handPause', state);
+      this.schedulePauseGraceVoidVote(roundNo, roundData);
     });
+  }
+
+  // After the grace period with player(s) still missing, the present players
+  // auto-consent to void the hand so it cannot hang forever waiting on someone
+  // who closed their browser. This reuses the audited unanimous-void path; a
+  // reconnect before the timer fires clears it and resumes play instead.
+  private schedulePauseGraceVoidVote(roundNo: number, roundData: TexasHoldemRound) {
+    if (roundData.pauseGraceTimer !== undefined || roundData.result) {
+      return;
+    }
+    if (!roundData.pausedMissingPlayers.length) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      roundData.pauseGraceTimer = undefined;
+      void this.castGraceVoidVoteIfStillPaused(roundNo, roundData)
+        .catch(error => console.warn(`Grace void vote failed for round ${roundNo}.`, error));
+    }, this.pauseGraceVoidMs);
+    (timer as unknown as {unref?: () => void}).unref?.();
+    roundData.pauseGraceTimer = timer;
+  }
+
+  private clearPauseGraceTimer(roundData: TexasHoldemRound) {
+    if (roundData.pauseGraceTimer !== undefined) {
+      clearTimeout(roundData.pauseGraceTimer);
+      roundData.pauseGraceTimer = undefined;
+    }
+  }
+
+  private async castGraceVoidVoteIfStillPaused(roundNo: number, roundData: TexasHoldemRound) {
+    if (roundData.result || !roundData.pausedMissingPlayers.length) {
+      return;
+    }
+    const players = await roundData.playersOrdered.promise;
+    const voters = this.getPauseVoters(roundData, players);
+    const myPeerId = await this.gameRoom.peerIdAsync;
+    if (!voters.includes(myPeerId) || roundData.voidVotes.get(myPeerId) === true) {
+      return;
+    }
+    await this.voteToVoidHand(roundNo, true);
   }
 
   private async handleVoidHandVoteEvent(e: VoidHandVoteEvent, who: string) {
@@ -1233,6 +1310,7 @@ export class TexasHoldemGameRoom {
     };
     roundData.result = result;
     this.clearTurnTimer(roundData);
+    this.clearPauseGraceTimer(roundData);
     for (const [player, amount] of Array.from(roundData.pot.entries())) {
       this.updateFundOfPlayer(player, (this.funds.get(player) ?? 0) + amount);
     }
