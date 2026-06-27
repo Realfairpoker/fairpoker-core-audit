@@ -61,12 +61,16 @@ function pruneIpfsGameOnlyBuild(targetBuildDir) {
     'ai.json',
     'audit',
     'audit-report.html',
+    'cookies.html',
     'independent-assurance.html',
     'llms.txt',
+    'privacy.html',
+    'responsible-play.html',
     'robots.txt',
     'security.html',
     'sitemap.xml',
     'source',
+    'terms.html',
     'verify-guide.html',
   ]) {
     removePath(path.join(targetBuildDir, name));
@@ -80,12 +84,16 @@ function assertIpfsGameOnlyBuild(targetBuildDir) {
     'ai.json',
     'audit',
     'audit-report.html',
+    'cookies.html',
     'independent-assurance.html',
     'llms.txt',
+    'privacy.html',
+    'responsible-play.html',
     'robots.txt',
     'security.html',
     'sitemap.xml',
     'source',
+    'terms.html',
     'verify-guide.html',
   ];
   for (const name of forbiddenPaths) {
