@@ -47,6 +47,10 @@ export interface HandPauseState {
   voters: string[];
   approvals: string[];
   rejections: string[];
+  // Epoch ms when the present players will auto-consent to void this paused hand
+  // if the missing player(s) have not returned. Drives the UI countdown so the
+  // outcome is never a surprise. Undefined if no grace timer is scheduled.
+  autoVoidAtMs?: number;
 }
 
 export interface TexasHoldemGameRoomEvents {
@@ -272,6 +276,7 @@ class TexasHoldemRound {
   disconnectedPlayers: Set<string> = new Set();
   voidVotes: Map<string, boolean> = new Map();
   pauseGraceTimer?: ReturnType<typeof setTimeout>;
+  pauseGraceDeadlineMs?: number;
 }
 
 export class TexasHoldemGameRoom {
@@ -1222,6 +1227,9 @@ export class TexasHoldemGameRoom {
       if (!roundData.pausedMissingPlayers.length || roundData.result) {
         return;
       }
+      // Start the grace clock first so the published state carries its deadline,
+      // letting the UI show an accurate "auto-void in Ns" countdown.
+      this.schedulePauseGraceVoidVote(roundNo, roundData);
       const voters = this.getPauseVoters(roundData, players);
       const approvals = voters.filter(player => roundData.voidVotes.get(player) === true);
       const rejections = voters.filter(player => roundData.voidVotes.get(player) === false);
@@ -1231,10 +1239,10 @@ export class TexasHoldemGameRoom {
         voters,
         approvals,
         rejections,
+        autoVoidAtMs: roundData.pauseGraceDeadlineMs,
       };
       this.handPauseByRound.set(roundNo, state);
       this.emitter.emit('handPause', state);
-      this.schedulePauseGraceVoidVote(roundNo, roundData);
     });
   }
 
@@ -1256,6 +1264,7 @@ export class TexasHoldemGameRoom {
     }, this.pauseGraceVoidMs);
     (timer as unknown as {unref?: () => void}).unref?.();
     roundData.pauseGraceTimer = timer;
+    roundData.pauseGraceDeadlineMs = Date.now() + this.pauseGraceVoidMs;
   }
 
   private clearPauseGraceTimer(roundData: TexasHoldemRound) {
@@ -1263,6 +1272,7 @@ export class TexasHoldemGameRoom {
       clearTimeout(roundData.pauseGraceTimer);
       roundData.pauseGraceTimer = undefined;
     }
+    roundData.pauseGraceDeadlineMs = undefined;
   }
 
   private async castGraceVoidVoteIfStillPaused(roundNo: number, roundData: TexasHoldemRound) {
