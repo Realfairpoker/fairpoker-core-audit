@@ -28,6 +28,19 @@ const includedRoots = [
   'src/lib/rules.ts',
   'src/lib/types.ts',
   'src/lib/utils.ts',
+  // Trust-boundary files the fairness claims depend on (identity, auth, transport,
+  // startup, relay, release identity). Added so sourceFingerprint covers the
+  // authentication/transport/startup paths, not just the core dealing logic. (A05.)
+  'src/lib/auth.ts',
+  'src/lib/registeredIdentity.ts',
+  'src/lib/setup.ts',
+  'src/lib/CloudflareRelayTransport.ts',
+  'src/lib/WorkerRelayMesh.ts',
+  'src/lib/signalingConfig.ts',
+  'src/lib/runtimeReleaseIdentity.ts',
+  'src/lib/clientCidVerification.ts',
+  'src/lib/ChatRoom.ts',
+  'src/lib/LifecycleManager.ts',
 ];
 
 const ignoredParts = new Set(['node_modules', 'build', '.git', 'generated']);

@@ -187,6 +187,8 @@ function createRoundAnalysis(round) {
       players: [],
       bets: 0,
       folds: 0,
+      autoFolds: 0,
+      voidVotes: 0,
       potTotal: 0,
       endedByFold: false,
       derivedResult: null,
@@ -215,6 +217,12 @@ function analyzeGameProtocol(transcript) {
   const errors = [];
   const warnings = [];
   const rounds = new Map();
+  // Tracks signed sequence numbers per (sender, sessionNonce) to detect replay
+  // and out-of-order signed events. Scoping by sessionNonce means a page reload
+  // (fresh signer starting at sequence 1) is a new session, not a false replay.
+  const signedSequenceByScope = new Map();
+  // Public signed-event signatures per round → canonical hand hash (T1.4/B09/D05).
+  const publicSignaturesByRound = new Map();
   const mentalSettingsByRound = new Map();
   const texasStateByRound = new Map();
   const finalizedDeckByRound = new Map();
@@ -534,7 +542,16 @@ function analyzeGameProtocol(transcript) {
         if (!owner || !participants.includes(owner)) {
           addError(errors, entry.index, `Round ${payload.round} card/decrypt has invalid key owner`);
         }
-        if (!payload.decryptionKey?.d || !payload.decryptionKey?.n) {
+        // Private hole-card deliveries are now end-to-end sealed to the recipient
+        // (audit B03): the verifier sees only ciphertext and cannot — by design —
+        // open it. A sealed private key only needs a structural check. Public
+        // reveals stay plaintext so the verifier can decrypt and check them.
+        const sealedPrivate = entry.scope === 'private'
+          && typeof payload.sealedKey === 'string'
+          && payload.sealedKey.length > 0;
+        if (sealedPrivate) {
+          // structurally valid sealed key; nothing further to verify here
+        } else if (!payload.decryptionKey?.d || !payload.decryptionKey?.n) {
           addError(errors, entry.index, `Round ${payload.round} card/decrypt is missing key material`);
         } else if (!isUsableDecryptionKey(payload.decryptionKey)) {
           addError(errors, entry.index, `Round ${payload.round} card/decrypt has invalid key material`);
@@ -669,7 +686,30 @@ function analyzeGameProtocol(transcript) {
 
   function validateTexasHoldem(entry) {
     const payload = payloadOf(entry.wireEvent);
-    if (!payload || typeof payload.round !== 'number') return;
+    if (!payload || typeof payload.type !== 'string') return;
+
+    // Lifecycle/settings events may omit a numeric round. Validate their shape
+    // and acknowledge them so the verifier recognizes EVERY table event type
+    // instead of silently skipping the ones without a round. (Audit D02.)
+    if (payload.type === 'action/updateSettings') {
+      if (!payload.settings || typeof payload.settings !== 'object') {
+        addError(errors, entry.index, 'updateSettings event is missing settings');
+      } else if (payload.settings.initialFundAmount !== undefined
+        && typeof payload.settings.initialFundAmount !== 'number') {
+        addError(errors, entry.index, 'updateSettings initialFundAmount must be a number when present');
+      }
+      return;
+    }
+    if (payload.type === 'action/sitOut'
+      || payload.type === 'action/returnToTable'
+      || payload.type === 'action/openRegistration') {
+      if (payload.round != null && typeof payload.round !== 'number') {
+        addError(errors, entry.index, `${payload.type} round must be a number when present`);
+      }
+      return;
+    }
+
+    if (typeof payload.round !== 'number') return;
 
     const round = ensureRound(rounds, payload.round);
     const sender = senderOf(entry);
@@ -714,13 +754,23 @@ function analyzeGameProtocol(transcript) {
         if (state.folded.has(sender)) {
           addError(errors, entry.index, `Folded player ${sender} attempted to bet`);
         }
-        if (typeof payload.amount !== 'number' || payload.amount < 0) {
+        // T2.3/C14: amounts are integer chip units.
+        if (!Number.isSafeInteger(payload.amount) || payload.amount < 0) {
           addError(errors, entry.index, `Invalid bet amount in round ${payload.round}`);
           return;
         }
         const fund = state.funds.get(sender) ?? 0;
         if (payload.amount > fund) {
           addError(errors, entry.index, `Bet exceeds available fund for ${sender}`);
+          return;
+        }
+        // T2.3/D03: a bet must bring the sender's total contribution up to at least
+        // the current highest contribution (call/raise) unless it is an all-in.
+        const currentMax = Array.from(state.pot.values()).reduce((max, value) => Math.max(max, value), 0);
+        const senderNewTotal = (state.pot.get(sender) ?? 0) + payload.amount;
+        const isAllIn = payload.amount === fund;
+        if (senderNewTotal < currentMax && !isAllIn) {
+          addError(errors, entry.index, `Round ${payload.round} bet by ${sender} totals ${senderNewTotal}, below the call amount ${currentMax} and not all-in`);
           return;
         }
         state.funds.set(sender, fund - payload.amount);
@@ -752,6 +802,53 @@ function analyzeGameProtocol(transcript) {
         }
         break;
       }
+      case 'action/autoFold': {
+        // An auto-fold removes the *target* player (not the sender) from the
+        // hand, exactly like a manual fold. Replaying it lets the verifier
+        // derive the correct settlement instead of ignoring it. (Audit D02.)
+        const state = texasStateByRound.get(payload.round);
+        if (!state) {
+          addError(errors, entry.index, `AutoFold for unknown round ${payload.round}`);
+          return;
+        }
+        const target = payload.target;
+        if (typeof target !== 'string' || target.length === 0) {
+          addError(errors, entry.index, `Round ${payload.round} autoFold is missing a target player`);
+          return;
+        }
+        if (!state.players.includes(target)) {
+          addError(errors, entry.index, `AutoFold target ${target} is not in round ${payload.round}`);
+          return;
+        }
+        if (state.ended) {
+          addError(errors, entry.index, `AutoFold after round ${payload.round} already ended`);
+        }
+        if (!state.folded.has(target)) {
+          state.folded.add(target);
+          round.texasHoldem.autoFolds += 1;
+          round.texasHoldem.folds += 1;
+          const playersLeft = state.players.filter(player => !state.folded.has(player));
+          if (playersLeft.length === 1) {
+            round.texasHoldem.endedByFold = true;
+            deriveLastOneWins(round, state, playersLeft[0]);
+          }
+        }
+        break;
+      }
+      case 'action/voidHandVote': {
+        // Structural validation + vote accounting. Full void/pause consensus
+        // derivation is intentionally out of scope for the local verifier, but
+        // the event is no longer silently skipped. (Audit D02.)
+        if (typeof payload.approve !== 'boolean') {
+          addError(errors, entry.index, `Round ${payload.round} voidHandVote.approve must be a boolean`);
+        }
+        const state = texasStateByRound.get(payload.round);
+        if (state && !state.players.includes(sender)) {
+          addError(errors, entry.index, `voidHandVote sender ${sender} is not in round ${payload.round}`);
+        }
+        round.texasHoldem.voidVotes += 1;
+        break;
+      }
     }
   }
 
@@ -763,6 +860,41 @@ function analyzeGameProtocol(transcript) {
     if (!payload || typeof payload.type !== 'string') {
       addError(errors, entry.index, 'Transcript entry payload is missing type');
       continue;
+    }
+
+    // T1.4: collect this round's PUBLIC signed-event signatures for the canonical
+    // hand hash (receiver-independent, so two transcripts can be compared). B09/D05.
+    if (entry.scope === 'public' && isSignedGameEvent(entry.wireEvent) && typeof payload.round === 'number') {
+      if (!publicSignaturesByRound.has(payload.round)) {
+        publicSignaturesByRound.set(payload.round, []);
+      }
+      publicSignaturesByRound.get(payload.round).push(entry.wireEvent.signature);
+    }
+
+    // Per-(sender, session) signed-sequence replay / ordering check. Reused
+    // sequence numbers within one signing session are flagged as a possible
+    // replay; out-of-order ones are warned. A page reload starts a new session
+    // (new nonce), so its reset counter is not mistaken for a replay.
+    // (Audit B06 per-sender sequence; B05/B07 domain separation.)
+    if (isSignedGameEvent(entry.wireEvent) && typeof entry.wireEvent.sequence === 'number') {
+      const sequenceSender = senderOf(entry);
+      const nonce = typeof entry.wireEvent.sessionNonce === 'string' ? entry.wireEvent.sessionNonce : '';
+      const scopeKey = `${sequenceSender}::${nonce}`;
+      const sequence = entry.wireEvent.sequence;
+      let track = signedSequenceByScope.get(scopeKey);
+      if (!track) {
+        track = { last: null, seen: new Set() };
+        signedSequenceByScope.set(scopeKey, track);
+      }
+      if (track.seen.has(sequence)) {
+        addError(errors, entry.index, `Duplicate signed sequence ${sequence} from ${sequenceSender} within one session (possible replay)`);
+      } else {
+        if (track.last !== null && sequence <= track.last) {
+          addWarning(warnings, entry.index, `Out-of-order signed sequence ${sequence} from ${sequenceSender} (previous ${track.last})`);
+        }
+        track.seen.add(sequence);
+        track.last = sequence;
+      }
     }
 
     validateMentalPoker(entry);
@@ -788,6 +920,11 @@ function analyzeGameProtocol(transcript) {
     if (round.texasHoldem.newRound && !round.mentalPoker.finalized) {
       addError(errors, null, `Round ${round.round} has table play without finalized deck`);
     }
+    // T1.4: canonical, receiver-independent hand hash. Serialized identically to
+    // src/lib/fairness/handConsensus.ts so a player's live receipt and this
+    // offline value can be compared across transcripts. (B09/D05.)
+    const signatures = (publicSignaturesByRound.get(round.round) || []).slice().sort();
+    round.canonicalHandHash = `sha256:${sha256Hex(JSON.stringify({round: round.round, signatures}))}`;
   }
 
   return {

@@ -11,6 +11,7 @@ import Deferred from "../Deferred";
 import {StandardCard} from "../secureMentalPoker";
 import {handRank} from "phe";
 import {TranscriptEntry, TranscriptSnapshot} from "../fairness/transcript";
+import {validateTableEvent} from "../fairness/eventSchema";
 
 export interface LastOneWins {
   how: 'LastOneWins',
@@ -324,6 +325,14 @@ export class TexasHoldemGameRoom {
 
     // texas holdem event listeners
     this.gameRoom.listener.on('event', this.lcm.register(({ data }, who, replay) => {
+      // Reject structurally invalid wire events before they reach the state
+      // machine, so malformed/malicious payloads cannot corrupt state or throw.
+      // (Audit C08 runtime schema validation, E02 malformed-input DoS.)
+      const validation = validateTableEvent(data);
+      if (!validation.ok) {
+        console.warn(`Dropping invalid Texas Hold'em event: ${validation.reason}`);
+        return;
+      }
       const handle = () => {
         switch (data.type) {
           case 'newRound':
@@ -1314,8 +1323,18 @@ export class TexasHoldemGameRoom {
   }
 
   private async handleBet(roundNo: number, raisedAmount: number, who: string, isSbBbFirstBet?: boolean, replay?: boolean) {
-    if (raisedAmount < 0) { // FIXME must be N * BB
-      console.warn(`Bet amount cannot be negative: ${raisedAmount}`);
+    // Defense in depth: reject non-finite, non-integer, or negative amounts.
+    // Wire bets are schema-checked at the dispatch boundary (eventSchema), but
+    // blind bets and any future caller route through here too, and a NaN amount
+    // would otherwise slip past the comparisons below (NaN < x is always false)
+    // and corrupt the pot. Chips are integer units, so amounts must be safe
+    // integers. (Audit C14 amount validation, E02 malformed input.)
+    //
+    // NOTE: full poker betting rules — minimum raise (N x big blind), legal
+    // all-in / side-pot boundaries, street progression — are NOT fully enforced
+    // here and remain roadmap items (see AUDIT_HARDENING_STATUS.md, C14/D03).
+    if (!Number.isSafeInteger(raisedAmount) || raisedAmount < 0) {
+      console.warn(`Bet amount must be a non-negative integer: ${raisedAmount}`);
       return;
     }
 

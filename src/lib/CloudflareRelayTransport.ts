@@ -161,6 +161,17 @@ function readLiveRelaySeq(roomId: string, peerId: string) {
   return liveRelaySeqByRoomAndPeer.get(relaySeqStorageKey(roomId, peerId)) ?? 0;
 }
 
+export const TOKEN_SUBPROTOCOL_PREFIX = 'fairpoker.token.';
+
+// Carries the relay auth token in the WebSocket subprotocol instead of only the
+// URL query, so it stays out of proxy/CDN/access logs. Browsers cannot set an
+// Authorization header on a WebSocket, so the subprotocol is the available
+// channel. The query token is kept for now as a fallback so the connection can
+// never break; once verified, the query token can be dropped. (Audit B11.)
+export function buildTokenSubprotocols(authToken?: string): string[] | undefined {
+  return authToken ? [`${TOKEN_SUBPROTOCOL_PREFIX}${authToken}`] : undefined;
+}
+
 function buildWebSocketUrl(serverUrl: string, roomId: string, peerId: string, authToken?: string) {
   const url = new URL(serverUrl);
   if (url.protocol === 'https:') {
@@ -250,7 +261,7 @@ export default class CloudflareRelayTransport {
       options.roomId,
       options.peerId,
       options.authToken,
-    ));
+    ), buildTokenSubprotocols(options.authToken));
 
     this.socket.addEventListener('message', (event) => this.handleServerMessage(event.data));
     this.socket.addEventListener('error', () => {

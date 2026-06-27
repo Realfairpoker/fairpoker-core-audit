@@ -49,6 +49,8 @@ export interface GameRoomEvents<T> {
 export type GameRoomOptions = {
   hostId?: string;
   eventSigner?: EventSigner;
+  /** Binds accepted events to this table id (conservative cross-table replay guard). */
+  expectedTableId?: string;
   /**
    * Security default: Fair Poker v0 table traffic rejects unsigned wire events.
    * Tests or legacy local simulations must opt out explicitly.
@@ -82,6 +84,7 @@ export default class GameRoom<T> {
   private readonly emitter = new EventEmitter<GameRoomEvents<GameEvent<T>>>();
   private readonly mesh: MeshLike<WireGameEvent<T>>;
   private readonly eventSigner?: EventSigner;
+  private readonly expectedTableId?: string;
   private readonly rejectUnsignedEvents: boolean;
   private readonly localCommitTimeoutMs: number;
   private readonly localCommitAttempts: number;
@@ -101,6 +104,7 @@ export default class GameRoom<T> {
     this.hostId = options?.hostId;
     this.mesh = mesh as MeshLike<WireGameEvent<T>>;
     this.eventSigner = options?.eventSigner;
+    this.expectedTableId = options?.expectedTableId;
     this.rejectUnsignedEvents = options?.rejectUnsignedEvents ?? true;
     this.localCommitTimeoutMs = options?.localCommitTimeoutMs ?? 5000;
     this.localCommitAttempts = options?.localCommitAttempts ?? 45;
@@ -209,6 +213,15 @@ export default class GameRoom<T> {
     const verification = await verifySignedGameEvent(data, transportSender);
     if (!verification.ok) {
       console.warn(`[GameRoom] rejected invalid signed event: ${verification.reason}`);
+      return null;
+    }
+
+    // Conservative cross-table replay guard: reject an event whose signed tableId
+    // does not match this room's table. Backward-compatible — only rejects when
+    // BOTH are present and differ, so events without a bound tableId still pass.
+    // (Audit B05.)
+    if (this.expectedTableId && data.tableId && data.tableId !== this.expectedTableId) {
+      console.warn(`[GameRoom] rejected event bound to table ${data.tableId}; this room is ${this.expectedTableId}.`);
       return null;
     }
 

@@ -264,7 +264,6 @@ async function initSetup() {
 
   const bundle = await getOrCreateSessionKeyBundle();
   const signingIdentity = await getOrCreateSigningIdentity();
-  const eventSigner = await createEventSigner(signingIdentity);
   const peerId = signingIdentity.peerId;
   const roomParams = getRoomParams(params, storedPeerId ?? peerId);
 
@@ -277,6 +276,8 @@ async function initSetup() {
     publishRoomParams(tableId, roomParams.hostId);
   }
   const roomId = tableId;
+  // Bind every signed event to this table so it cannot be replayed into another.
+  const eventSigner = await createEventSigner(signingIdentity, {tableId});
 
   const signalingUrl = getSignalingUrl();
   const mesh = signalingUrl
@@ -308,16 +309,21 @@ async function initSetup() {
   const gameRoom = new GameRoom<AllEvents>(mesh, {
     hostId: roomParams.hostId,
     eventSigner,
+    expectedTableId: tableId,
     rejectUnsignedEvents: true,
   });
 
-  const texasHoldem = new TexasHoldemGameRoom(
-    gameRoom,
-    new MentalPokerGameRoom(gameRoom, roomId),
-  );
+  const mentalPokerGameRoom = new MentalPokerGameRoom(gameRoom, roomId, {
+    privateKey: bundle.privateKey,
+    publicKeyJwk: bundle.publicKeyJwk,
+  });
+  const texasHoldem = new TexasHoldemGameRoom(gameRoom, mentalPokerGameRoom);
 
   const chat = new ChatRoom(gameRoom);
   void chat.announceClientVersion(getClientVersionClaim());
+  // Publish our RSA encryption public key so peers can seal private per-card
+  // keys to us end-to-end; the relay then only ever sees ciphertext. (B03/B04.)
+  void mentalPokerGameRoom.announceEncryptionKey();
 
   window.addEventListener('beforeunload', () => {
     texasHoldem.close();

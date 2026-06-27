@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import {createEventSigner, EventSigner, generateSigningIdentity} from "./eventSigning";
 import {TranscriptRecorder, TranscriptSnapshot} from "./transcript";
+import {canonicalHandHash} from "./handConsensus";
 
 type GameEventPayload = Record<string, unknown>;
 
@@ -400,6 +401,75 @@ describe('transcript verifier CLI', () => {
     });
   });
 
+  test('exposes a canonical hand hash matching the live handConsensus value', async () => {
+    const transcript = await createValidTranscript();
+    const result = runVerifier(writeTranscript(transcript));
+    const round1 = result.gameProtocol.rounds.find(r => r.round === 1);
+    expect(round1).toBeDefined();
+    const handHash = (round1 as unknown as {canonicalHandHash: string}).canonicalHandHash;
+    expect(handHash).toMatch(/^sha256:[0-9a-f]+$/);
+    // The offline verifier and a live client must compute the SAME hand hash, so
+    // two players can compare their records of the hand. (Audit D05.)
+    expect(handHash).toBe(await canonicalHandHash(transcript.entries, 1));
+  });
+
+  test('replays action/autoFold as a fold of the target player', async () => {
+    const {alice, bob} = await createPlayerSigners();
+    const recorder = new TranscriptRecorder<GameEventPayload>();
+
+    await appendFinalizedDeck(recorder, alice, bob);
+    await appendSigned(recorder, alice, {
+      type: 'newRound',
+      round: 1,
+      players: [alice.identity.peerId, bob.identity.peerId],
+      settings: {initialFundAmount: 100},
+    });
+    await appendSigned(recorder, alice, {type: 'action/bet', round: 1, amount: 1});
+    await appendSigned(recorder, bob, {type: 'action/bet', round: 1, amount: 0});
+    // Any client may broadcast an auto-fold; here alice's client reports bob timed out.
+    await appendSigned(recorder, alice, {
+      type: 'action/autoFold',
+      round: 1,
+      target: bob.identity.peerId,
+    });
+
+    const result = runVerifier(writeTranscript(recorder.snapshot()));
+
+    expect(result.gameProtocol.ok).toBe(true);
+    expect(result.gameProtocol.rounds[0].texasHoldem).toMatchObject({
+      autoFolds: 1,
+      folds: 1,
+      endedByFold: true,
+    });
+  });
+
+  test('rejects action/autoFold targeting a non-participant', async () => {
+    const {alice, bob} = await createPlayerSigners();
+    const recorder = new TranscriptRecorder<GameEventPayload>();
+
+    await appendFinalizedDeck(recorder, alice, bob);
+    await appendSigned(recorder, alice, {
+      type: 'newRound',
+      round: 1,
+      players: [alice.identity.peerId, bob.identity.peerId],
+      settings: {initialFundAmount: 100},
+    });
+    await appendSigned(recorder, alice, {
+      type: 'action/autoFold',
+      round: 1,
+      target: 'ghost-player',
+    });
+
+    const result = runVerifierExpectingFailure(writeTranscript(recorder.snapshot()));
+
+    expect(result.ok).toBe(false);
+    expect(result.gameProtocol.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: 'AutoFold target ghost-player is not in round 1',
+      }),
+    ]));
+  });
+
   test('accepts a signed transcript where every participant shuffles and locks', async () => {
     const {alice, bob, carol} = await createThreePlayerSigners();
     const players = [alice, bob, carol];
@@ -588,6 +658,27 @@ describe('transcript verifier CLI', () => {
       expect.objectContaining({
         message: 'Round 1 finalized deck contains duplicate ciphertexts',
       }),
+    ]));
+  });
+
+  test('rejects an under-bet that does not reach the call amount', async () => {
+    const {alice, bob} = await createPlayerSigners();
+    const recorder = new TranscriptRecorder<GameEventPayload>();
+    await appendFinalizedDeck(recorder, alice, bob);
+    await appendSigned(recorder, alice, {
+      type: 'newRound',
+      round: 1,
+      players: [alice.identity.peerId, bob.identity.peerId],
+      settings: {initialFundAmount: 100},
+    });
+    // alice is the small blind (total 1); betting 0 leaves her total at 1, below
+    // the big blind's 2, and is not an all-in — an illegal under-call. (D03)
+    await appendSigned(recorder, alice, {type: 'action/bet', round: 1, amount: 0});
+
+    const result = runVerifierExpectingFailure(writeTranscript(recorder.snapshot()));
+    expect(result.ok).toBe(false);
+    expect(result.gameProtocol.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({message: expect.stringContaining('below the call amount')}),
     ]));
   });
 });

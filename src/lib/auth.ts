@@ -193,6 +193,36 @@ async function deriveVaultKey(password: string, salt: string, iterations: number
   );
 }
 
+// Derives the value sent to the server for login authentication. It is a
+// password-based KDF output salted by the username, and is DOMAIN-SEPARATED from
+// the vault key (different salt), so the server only ever sees `authSecret` and
+// never the raw password, and cannot derive the vault key from it without
+// brute-forcing the password. The raw password therefore never leaves the
+// browser, and the server can no longer instantly decrypt the vault. (Audit B01.)
+export async function deriveAuthSecret(username: string, password: string): Promise<string> {
+  const rawKey = await crypto.subtle.importKey(
+    'raw',
+    utf8Bytes(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const salt = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', utf8Bytes(`fairpoker-auth-secret:${cleanUsername(username)}`)),
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      hash: 'SHA-256',
+      salt,
+      iterations: VAULT_KDF_ITERATIONS,
+    },
+    rawKey,
+    256,
+  );
+  return bytesToBase64Url(bits);
+}
+
 export async function encryptVault(vault: RegisteredIdentityVault, password: string): Promise<EncryptedAuthVault> {
   const salt = randomBase64Url(16);
   const iv = randomBase64Url(12);
@@ -246,9 +276,10 @@ export async function register(username: string, password: string) {
   }
   const vault = await createRegisteredVault();
   const encryptedVault = await encryptVault(vault, password);
+  const authSecret = await deriveAuthSecret(username, password);
   const result = await requestJson<{ session: AuthSession }>('/auth/register', {
     username: cleanUsername(username),
-    password,
+    authSecret,
     vault: encryptedVault,
   });
   return installSession(result.session, vault);
@@ -260,9 +291,10 @@ export async function login(username: string, password: string) {
   if (usernameError || passwordError) {
     throw new Error(usernameError || passwordError);
   }
+  const authSecret = await deriveAuthSecret(username, password);
   const result = await requestJson<{ session: AuthSession; vault: EncryptedAuthVault }>('/auth/login', {
     username: cleanUsername(username),
-    password,
+    authSecret,
   });
   const vault = await decryptVault(result.vault, password);
   return installSession(result.session, vault);
@@ -276,13 +308,14 @@ export async function enterAccount(username: string, password: string) {
   }
   const vault = await createRegisteredVault();
   const encryptedVault = await encryptVault(vault, password);
+  const authSecret = await deriveAuthSecret(username, password);
   const result = await requestJson<{
     created: boolean;
     session: AuthSession;
     vault?: EncryptedAuthVault;
   }>('/auth/enter', {
     username: cleanUsername(username),
-    password,
+    authSecret,
     vault: encryptedVault,
   });
   const activeVault = result.created

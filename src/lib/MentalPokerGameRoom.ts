@@ -18,6 +18,8 @@ import {EventListener} from "./types";
 import EventEmitter from "eventemitter3";
 import LifecycleManager from "./LifecycleManager";
 import {encryptAndSecureShuffle} from "./cryptoShuffle";
+import {validateMentalPokerEvent, isMentalPokerEventType} from "./fairness/mentalPokerSchema";
+import {sealCardKey, openCardKey} from "./fairness/privateEventCrypto";
 
 export interface MentalPokerRoundSettings {
   participants?: string[];
@@ -67,7 +69,28 @@ export interface DecryptCardEvent {
   cardOffset: number;
   player?: string;
   aliceOrBob?: 'alice' | 'bob';
-  decryptionKey: { d: string; n: string };
+  // Plaintext per-card key — used for PUBLIC reveals (board/showdown), which must
+  // stay verifiable by the offline transcript verifier.
+  decryptionKey?: { d: string; n: string };
+  // End-to-end sealed per-card key — used for PRIVATE deals, so the relay only
+  // sees ciphertext. Exactly one of decryptionKey / sealedKey is present.
+  sealedKey?: string;
+}
+
+// Announces this client's RSA-OAEP public key so peers can seal private per-card
+// decryption keys to it end-to-end. Sent as a signed public event, so the
+// mapping peerId -> encryption key is authenticated by the signing identity.
+export interface EncryptionKeyAnnounceEvent {
+  type: 'identity/encryptionKey';
+  publicKeyJwk: JsonWebKey;
+}
+
+// Local RSA-OAEP keypair used to seal (send) and open (receive) private per-card
+// keys end-to-end, so the relay only sees ciphertext. Optional: when absent the
+// room keeps the legacy plaintext private-key behavior (used by unit tests).
+export interface MentalPokerCryptoOptions {
+  privateKey: CryptoKey;
+  publicKeyJwk: JsonWebKey;
 }
 
 export type MentalPokerEvent =
@@ -76,6 +99,7 @@ export type MentalPokerEvent =
   | DeckLockEvent
   | DeckFinalizedEvent
   | DecryptCardEvent
+  | EncryptionKeyAnnounceEvent
 ;
 
 function toStringEncodedDeck(deck: EncodedDeck): StringEncodedDeck {
@@ -276,15 +300,36 @@ export default class MentalPokerGameRoom {
 
   private readonly lcm = new LifecycleManager();
 
-  constructor(gameRoom: GameRoomLike<MentalPokerEvent | any>, storageScope?: string) {
+  // Local RSA-OAEP keypair (optional) and the authenticated map of peer
+  // encryption public keys collected from `identity/encryptionKey` announces.
+  private readonly cryptoOptions?: MentalPokerCryptoOptions;
+  private readonly peerEncryptionKeys: Map<string, Deferred<CryptoKey>> = new Map();
+
+  constructor(
+    gameRoom: GameRoomLike<MentalPokerEvent | any>,
+    storageScope?: string,
+    cryptoOptions?: MentalPokerCryptoOptions,
+  ) {
     this.gameRoom = gameRoom;
     this.storageScope = storageScope || 'local-table';
+    this.cryptoOptions = cryptoOptions;
 
     this.propagate('status');
     this.propagate('connected');
     this.propagate('members');
 
     this.gameRoom.listener.on('event', this.lcm.register(({ data }, who, replay) => {
+      // Reject structurally invalid deck/key wire events before they reach
+      // BigInt() and the SRA crypto, so malformed/oversized payloads cannot
+      // throw, stall, or corrupt the deck. Only mental-poker events are gated
+      // here; other event types pass through untouched. (Audit C03/C04/C05/E02.)
+      if (isMentalPokerEventType((data as {type?: unknown}).type)) {
+        const validation = validateMentalPokerEvent(data);
+        if (!validation.ok) {
+          console.warn(`Dropping invalid mental-poker event: ${validation.reason}`);
+          return;
+        }
+      }
       switch (data.type) {
         case 'start':
           this.handleRoundStartEvent(data, !!replay);
@@ -300,6 +345,9 @@ export default class MentalPokerGameRoom {
           break;
         case 'card/decrypt':
           this.handleCardDecrypted(data, who);
+          break;
+        case 'identity/encryptionKey':
+          void this.handleEncryptionKeyAnnounce(data, who);
           break;
       }
     }, listener => this.gameRoom.listener.off('event', listener)));
@@ -452,18 +500,57 @@ export default class MentalPokerGameRoom {
     for (const participant of participants) {
       const dk = await this.getDecryptionKeyForCard(roundData, cardOffset, participant);
       if (dk) {
-        const event: DecryptCardEvent = {
-          type: 'card/decrypt',
-          round,
-          cardOffset,
-          player: participant,
-          decryptionKey: dk,
-        };
+        // Resolve our own card locally with the plaintext key (never hits the wire).
         if (recipient === myPeerId) {
-          await this.handleCardDecrypted(event, participant);
+          await this.handleCardDecrypted(
+            {type: 'card/decrypt', round, cardOffset, player: participant, decryptionKey: dk},
+            participant,
+          );
+        }
+        // Wire event: end-to-end sealed to the recipient when crypto is enabled
+        // (relay sees only ciphertext); legacy plaintext otherwise. Fail closed
+        // (skip + let the caller retry) rather than ever downgrade to plaintext.
+        const wireEvent = await this.buildCardDecryptWireEvent(participant, dk, recipient, round, cardOffset);
+        if (!wireEvent) {
+          continue;
         }
         console.debug(`Dealing the card [ ${cardOffset} ] to ${recipient}.`);
-        await this.firePrivateEvent(event, recipient);
+        await this.firePrivateEvent(wireEvent, recipient);
+      }
+    }
+  }
+
+  private async buildCardDecryptWireEvent(
+    participant: string,
+    dk: { d: string; n: string },
+    recipient: string,
+    round: number,
+    cardOffset: number,
+  ): Promise<DecryptCardEvent | null> {
+    const base = {type: 'card/decrypt' as const, round, cardOffset, player: participant};
+    if (!this.cryptoOptions) {
+      return {...base, decryptionKey: dk};
+    }
+    const recipientKey = await this.awaitPeerEncryptionKey(recipient);
+    if (!recipientKey) {
+      console.warn(`No encryption key available for ${recipient} yet; deferring sealed deal for round ${round} card ${cardOffset} (will retry).`);
+      return null;
+    }
+    const sealedKey = await sealCardKey(dk, {sender: participant, recipient, round, cardOffset}, recipientKey);
+    return {...base, sealedKey};
+  }
+
+  private async awaitPeerEncryptionKey(peerId: string, timeoutMs = 8000): Promise<CryptoKey | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+      (timer as unknown as {unref?: () => void}).unref?.();
+    });
+    try {
+      return await Promise.race([this.getPeerEncryptionKey(peerId), timeout]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
       }
     }
   }
@@ -685,9 +772,37 @@ export default class MentalPokerGameRoom {
     roundData.deck.resolve(toBigIntEncodedDeck(e.deck));
   }
 
+  // Returns the plaintext per-card key for an incoming card/decrypt event:
+  // opens the sealed key with our private key (verifying the binding) when the
+  // event is sealed, or returns the plaintext key for public reveals.
+  private async resolveCardKeyMaterial(e: DecryptCardEvent, sender?: string): Promise<{ d: string; n: string } | null> {
+    if (e.sealedKey) {
+      if (!this.cryptoOptions) {
+        console.warn(`Received a sealed card key but no local decryption key is configured (round ${e.round}, card ${e.cardOffset}).`);
+        return null;
+      }
+      const myPeerId = await this.gameRoom.peerIdAsync;
+      try {
+        return await openCardKey(
+          e.sealedKey,
+          {sender: sender ?? e.player ?? '', recipient: myPeerId, round: e.round, cardOffset: e.cardOffset},
+          this.cryptoOptions.privateKey,
+        );
+      } catch (error) {
+        console.warn(`Failed to open sealed card key (round ${e.round}, card ${e.cardOffset}).`, error);
+        return null;
+      }
+    }
+    return e.decryptionKey ?? null;
+  }
+
   private async handleCardDecrypted(e: DecryptCardEvent, sender?: string) {
     const roundData = this.getOrCreateDataForRound(e.round);
-    const dk = new DecryptionKey(BigInt(e.decryptionKey.d), BigInt(e.decryptionKey.n));
+    const keyMaterial = await this.resolveCardKeyMaterial(e, sender);
+    if (!keyMaterial) {
+      return;
+    }
+    const dk = new DecryptionKey(BigInt(keyMaterial.d), BigInt(keyMaterial.n));
     let participant = e.player;
     if (!participant && e.aliceOrBob) {
       const settings = await roundData.mentalPokerSettings.promise;
@@ -717,5 +832,50 @@ export default class MentalPokerGameRoom {
       recipient,
       data: e,
     });
+  }
+
+  private peerEncryptionKeyDeferred(peerId: string): Deferred<CryptoKey> {
+    let deferred = this.peerEncryptionKeys.get(peerId);
+    if (!deferred) {
+      deferred = new Deferred<CryptoKey>();
+      this.peerEncryptionKeys.set(peerId, deferred);
+    }
+    return deferred;
+  }
+
+  // Resolves a peer's announced RSA-OAEP public key, used to seal private card
+  // keys to that peer. Stays pending until the peer announces its key.
+  getPeerEncryptionKey(peerId: string): Promise<CryptoKey> {
+    return this.peerEncryptionKeyDeferred(peerId).promise;
+  }
+
+  // Publishes this client's RSA-OAEP public key (signed public event) so peers
+  // can seal private per-card keys to it. No-op without crypto options.
+  async announceEncryptionKey(): Promise<void> {
+    if (!this.cryptoOptions) {
+      return;
+    }
+    await this.firePublicEvent({
+      type: 'identity/encryptionKey',
+      publicKeyJwk: this.cryptoOptions.publicKeyJwk,
+    });
+  }
+
+  private async handleEncryptionKeyAnnounce(e: EncryptionKeyAnnounceEvent, sender?: string) {
+    if (!sender) {
+      return;
+    }
+    try {
+      const key = await crypto.subtle.importKey(
+        'jwk',
+        e.publicKeyJwk,
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        false,
+        ['encrypt'],
+      );
+      this.peerEncryptionKeyDeferred(sender).resolve(key);
+    } catch (error) {
+      console.warn(`Ignoring invalid encryption key announce from ${sender}.`, error);
+    }
   }
 }

@@ -4,6 +4,19 @@ import {sha256Base64Url, sha256Hex} from "./hash";
 
 export const SIGNED_EVENT_KIND = 'fairpoker.signed-event.v1';
 
+// A per-signer-instance random nonce embedded in (and therefore signed by) every
+// event. It gives each signing session a distinct cryptographic domain: a page
+// reload creates a new signer with a new nonce, so events from different sessions
+// are separable. This lets the offline verifier scope per-sender sequence checks
+// by session — so a reload that resets the local sequence counter is NOT mistaken
+// for a replay — and lets a replayed event from another session be detected.
+// (Audit B05/B06/B07 domain separation; no live rejection path is added.)
+function randomSessionNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export interface SigningIdentity {
   peerId: string;
   publicKeyJwk: JsonWebKey;
@@ -17,6 +30,8 @@ export interface SignedGameEvent<T> {
   scope: 'public' | 'private';
   recipient?: string;
   sequence: number;
+  sessionNonce?: string;
+  tableId?: string;
   signedAt: string;
   payload: T;
   payloadHash: string;
@@ -73,7 +88,10 @@ export async function fingerprintPublicKey(publicKeyJwk: JsonWebKey): Promise<st
   return `sha256:${await sha256Hex(canonicalJson(publicKeyJwk))}`;
 }
 
-export async function createEventSigner(identity: SigningIdentity): Promise<EventSigner> {
+export async function createEventSigner(
+  identity: SigningIdentity,
+  context?: { tableId?: string },
+): Promise<EventSigner> {
   const privateKey = await crypto.subtle.importKey(
     'jwk',
     identity.privateKeyJwk,
@@ -82,6 +100,10 @@ export async function createEventSigner(identity: SigningIdentity): Promise<Even
     ['sign'],
   );
   let sequence = 0;
+  const sessionNonce = randomSessionNonce();
+  // Binds every signed event to its table, so an event signed for one table
+  // cannot be replayed into another while still verifying. (Audit B05.)
+  const tableId = context?.tableId;
 
   return {
     identity,
@@ -101,6 +123,8 @@ export async function createEventSigner(identity: SigningIdentity): Promise<Even
         scope,
         ...(recipient ? { recipient } : {}),
         sequence: ++sequence,
+        sessionNonce,
+        ...(tableId ? { tableId } : {}),
         signedAt: new Date().toISOString(),
         payload,
         payloadHash: `sha256:${await sha256Hex(canonicalJson(payload))}`,

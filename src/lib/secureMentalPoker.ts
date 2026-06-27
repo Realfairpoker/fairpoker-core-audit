@@ -21,19 +21,21 @@ const SUITS: Suit[] = ['Heart', 'Diamond', 'Club', 'Spade'];
 const RANKS: Rank[] = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
 
 export const DEFAULT_MENTAL_POKER_BITS = 256;
-export const MIN_MENTAL_POKER_BITS = 128;
+// Security floor for the mental-poker SRA key size. Raised from 128 to 256 so the
+// audit-flagged weak 128-bit option can no longer be used. (Audit C02.)
+export const MIN_MENTAL_POKER_BITS = 256;
 
 export function normalizeMentalPokerBits(bits?: number): number {
-  const normalizedBits = bits ?? DEFAULT_MENTAL_POKER_BITS;
-  if (!Number.isInteger(normalizedBits)) {
-    throw new Error(`Mental poker SRA bits must be an integer, got ${normalizedBits}`);
+  const requestedBits = bits ?? DEFAULT_MENTAL_POKER_BITS;
+  if (!Number.isInteger(requestedBits)) {
+    throw new Error(`Mental poker SRA bits must be an integer, got ${requestedBits}`);
   }
-  if (normalizedBits < MIN_MENTAL_POKER_BITS) {
-    throw new Error(
-      `Mental poker SRA bits must be at least ${MIN_MENTAL_POKER_BITS}, got ${normalizedBits}`
-    );
-  }
-  return normalizedBits;
+  // Enforce the security floor by clamping UP rather than throwing. An older or
+  // misconfigured table is transparently upgraded to the minimum instead of
+  // failing to start, and a malicious `start` event requesting tiny bits (e.g. 8)
+  // can no longer crash every client with an unhandled throw — it is just
+  // upgraded to the floor. (Audit C02 weak params; E02 malformed-input DoS.)
+  return Math.max(MIN_MENTAL_POKER_BITS, requestedBits);
 }
 
 export function getStandard52Deck(): StandardDeck {
